@@ -87,9 +87,19 @@ The skill prevents inconsistent output through:
 
 ```
 research-visualizer/
-├── SKILL.md    # The full agent skill definition (7 phases + 6 appendices)
-└── README.md   # This file
+├── SKILL.md                              # Core skill instructions (218 lines)
+├── README.md                             # This file
+└── references/
+    ├── research-dimensions.md            # Standard Research Dimensions Framework
+    ├── visualization-rules.md            # Chart type auto-selection rules + color palette
+    ├── subgroup-discovery.md             # Split decision matrix + taxonomy search templates + data quality tiers
+    └── build-templates.md                # Tech stack, file structures, data schemas, component patterns
 ```
+
+Follows the [agentskills.io specification](https://agentskills.io/specification):
+- SKILL.md < 500 lines with progressive disclosure
+- Reference files loaded on-demand, not at activation
+- Frontmatter includes `name`, `description`, `compatibility`, and `metadata`
 
 ## License
 
