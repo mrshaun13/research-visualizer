@@ -1,331 +1,525 @@
 ---
+name: research-visualizer
 description: Deep research on any topic and build an interactive statistical visualization dashboard from the findings
 ---
 
 # Deep Research → Interactive Dashboard Pipeline
 
-A repeatable agentic workflow for conducting deep research on any topic, compiling structured datasets from findings, and producing a polished interactive web dashboard with statistical visualizations.
+A repeatable agentic workflow that takes a simple research topic from a user, autonomously discovers the right dimensions, metrics, subgroups, and taxonomies, then produces a polished interactive web dashboard with statistical visualizations.
 
-## Overview
+## Design Philosophy
 
-This skill follows a 6-phase pipeline inspired by agentic research frameworks:
+**The user should NOT need to:**
+- Know academic terminology (e.g., "Greatest Generation" vs "people born in the 1920s")
+- Pre-specify subgroups they haven't discovered yet
+- List domain-specific taxonomies (health conditions, trend categories, etc.)
+- Know what chart types exist or which ones fit their data
+- Provide a structured research plan before research begins
+
+**The agent SHOULD autonomously:**
+- Interpret natural language into research scope
+- Discover meaningful subgroups within populations
+- Identify core metrics from the topic domain
+- Compile domain-specific taxonomies from the literature
+- Apply standard research methodology dimensions automatically
+- Select visualization types based on data shape after collection
+- Present a lightweight checkpoint for user approval before building
+
+## Pipeline Overview
 
 ```
-DEFINE → RESEARCH → COMPILE → STRUCTURE → VISUALIZE → PRESENT
+INTERPRET → SURVEY → DISCOVER → RESEARCH → ANALYZE → BUILD → PRESENT
+     ↑                              ↓
+     └──── User Checkpoint ─────────┘
 ```
 
-Each phase has clear inputs, outputs, and quality gates.
+The user provides a topic in natural language. The agent does the rest, pausing once after DISCOVER for a lightweight approval before committing to the full build.
 
 ---
 
-## Phase 1: DEFINE — Scope the Research
+## Phase 1: INTERPRET — Understand the User's Intent
 
-**Goal:** Turn a vague topic into a structured research plan with measurable dimensions.
+**Goal:** Parse a natural language prompt into research parameters without requiring structured input.
+
+**Input examples (all valid):**
+- "Research sexual behavior trends and the adult entertainment industry across American generations"
+- "How has drug use changed in America since the 1960s and what are the health impacts?"
+- "Compare remote work vs office work outcomes since COVID"
+- "Study the evolution of hip-hop culture and its economic impact"
 
 ### Steps:
 
-1. **Clarify the research question** with the user. Ask:
-   - What is the core topic?
-   - What populations/groups should be compared?
-   - What time periods or generational cohorts matter?
-   - What specific metrics or dimensions are they hoping to find?
-   - Are there any known data sources they want included?
+1. **Extract the core topic.** What is being studied? (behavior, industry, culture, phenomenon)
 
-2. **Identify comparison axes.** Every good research dashboard needs at least 2-3 axes of comparison. Common patterns:
-   - **Time/Generation axis:** How has X changed over time?
-   - **Group axis:** How does X differ between populations (gender, occupation, age, geography)?
-   - **Metric axis:** What different measurements of X exist (counts, rates, percentages, averages)?
+2. **Extract implied populations.** Who is involved? Map casual references to researchable groups:
+   - "the adult industry" → adult entertainment workers (subgroups TBD)
+   - "American generations" → US population segmented by birth cohort
+   - "since COVID" → 2019-present, with pre-COVID baseline
+   - "people as far back as the 30s" → birth cohorts from ~1930 onward
 
-3. **Define the dimension matrix.** Create a structured outline like:
-   ```
-   Topic: [TOPIC]
-   Groups: [GROUP_A, GROUP_B, GROUP_C, ...]
-   Time Axis: [PERIOD_1, PERIOD_2, ..., PERIOD_N]
-   Metrics:
-     - Metric 1: [description] by [group] by [time]
-     - Metric 2: [description] by [group] by [time]
-     ...
-   Trend Categories:
-     - Category 1: [list of ~25-30 items to track prevalence of]
-     - Category 2: [list of ~25-30 items to track prevalence of]
-   ```
+3. **Extract time scope.** Map natural language to temporal boundaries:
+   - "across generations" → all living/recent generations
+   - "since the 60s" → 1960-present
+   - "over the last decade" → ~2015-2025
+   - Do NOT assume a specific segmentation yet (generations vs decades vs eras) — that's discovered in Phase 3
 
-4. **Identify chart types needed.** Map each metric to a visualization:
-   - **Bar charts:** Comparing discrete groups (e.g., avg X by generation by gender)
-   - **Grouped/stacked bars:** Multi-dimensional comparisons
-   - **Line charts:** Trends over continuous time
-   - **Heatmaps:** Large matrices (e.g., 30 trends x 6 generations x 3 groups)
-   - **Horizontal bar charts:** Ranked lists, prevalence comparisons
-   - **Composed charts:** Overlaying bars + lines (e.g., entry age bars + career length line)
-   - **Radar charts:** Multi-dimensional profiles
+4. **Extract research intent.** What angle does the user care about?
+   - Trends over time? Comparison between groups? Impact/outcomes? Cultural shifts?
+   - If unclear, default to: "comprehensive overview with temporal and group comparisons"
+
+5. **Classify the topic** into one or more research lenses (used to trigger automatic dimensions in Phase 3):
+   - **Population lens:** Studying a group of people → triggers demographics, health, economic, social dimensions
+   - **Behavior lens:** Studying a behavior/trend → triggers prevalence, taxonomy, participant demographics, outcomes
+   - **Industry lens:** Studying a market/industry → triggers market size, revenue, worker conditions, career outcomes
+   - **Culture lens:** Studying cultural phenomena → triggers generational shifts, media representation, public opinion
+   - Most topics are 2-3 of these combined.
 
 ### Output of Phase 1:
-- A written research plan with all dimensions, groups, metrics, and chart types
-- User approval before proceeding
+- Topic, populations, time scope, intent, applicable research lenses
+- NO user interaction needed — proceed directly to Phase 2
 
 ---
 
-## Phase 2: RESEARCH — Deep Information Gathering
+## Phase 2: SURVEY — Broad Landscape Scan
 
-**Goal:** Gather the best available data from multiple source types.
+**Goal:** Understand the research landscape before diving deep. What major studies exist? What dimensions do researchers measure? What's the shape of this field?
 
 ### Steps:
 
-1. **Identify source categories** for the topic:
-   - **Academic/peer-reviewed:** Google Scholar, PubMed, JSTOR, specific journals
-   - **Government/institutional:** Census, CDC, WHO, BLS, survey datasets (GSS, NHANES, etc.)
-   - **Industry reports:** Trade publications, annual reports, market research
-   - **Large-scale surveys:** Pew Research, Gallup, specialized surveys
-   - **Platform/behavioral data:** Usage statistics, search trends, platform reports
-   - **Meta-analyses:** Systematic reviews that aggregate multiple studies
+1. **Conduct 3-5 broad searches:**
+   - "[topic] research overview"
+   - "[topic] major studies statistics"
+   - "[topic] trends data [time scope]"
+   - "[population] demographics research"
+   - "[topic] systematic review OR meta-analysis"
 
-2. **Use web search and fetch tools** to gather data. For each dimension in the research plan:
-   - Search for "[metric] by [group] [time period] study OR survey OR data"
-   - Fetch and extract key statistics from found sources
-   - Note the source, sample size, methodology, and year for each data point
-   - Flag data quality: peer-reviewed > institutional > industry > self-reported
+2. **From results, identify:**
+   - **Major studies and datasets** that exist for this topic (e.g., GSS, NHANES, Pornhub Insights)
+   - **Commonly measured dimensions** — what do researchers in this field actually measure?
+   - **Known subgroups** — do existing studies break the population into subgroups?
+   - **Temporal inflection points** — are there known turning points? (e.g., internet era, COVID, policy changes)
+   - **Data availability signals** — where is data rich vs sparse?
 
-3. **Cross-reference and triangulate.** For each data point:
-   - Try to find 2-3 independent sources
-   - Note where sources agree vs. disagree
-   - When sources conflict, weight by: sample size, recency, methodology rigor
-   - Clearly mark single-source estimates vs. well-corroborated figures
-
-4. **Fill gaps with informed estimates.** When data does not exist for a specific cell:
-   - Interpolate from adjacent data points (e.g., if you have Gen X and Millennial data, estimate Silent Gen from trends)
-   - Use proxy indicators (e.g., search trend data as proxy for behavior prevalence)
-   - Mark all estimates clearly with confidence levels
-
-5. **Track all sources** in a structured citation list with:
-   - Author(s), title, publication, year
-   - What specific data points came from each source
-   - Any methodological limitations noted
+3. **Determine temporal segmentation.** Based on the topic, decide the best time axis:
+   - **Generations** — best for social/cultural/behavioral topics spanning 50+ years
+   - **Decades** — best for economic/industry topics or shorter spans
+   - **Policy eras** — best for topics driven by regulation (e.g., pre/post legalization)
+   - **Technology eras** — best for topics driven by tech (e.g., pre/post internet, pre/post smartphone)
+   - Map the user's natural language time scope to the chosen segmentation
 
 ### Output of Phase 2:
-- Raw data points organized by dimension
-- Source citation list
-- Data quality/confidence notes
+- List of major data sources and studies
+- Preliminary dimension list
+- Chosen temporal segmentation with justification
+- Proceed directly to Phase 3
 
 ---
 
-## Phase 3: COMPILE — Structure Raw Data into Datasets
+## Phase 3: DISCOVER — Autonomous Dimension Discovery
 
-**Goal:** Transform raw research findings into clean, structured JavaScript data objects.
+**Goal:** Identify the specific subgroups, metrics, and taxonomies that matter for this topic. This is where the skill becomes intelligent — discovering what the user would have had to specify manually.
 
-### Steps:
+### 3A: Subgroup Discovery Protocol
 
-1. **Design the data schema.** For each visualization, define the exact data shape:
-   ```javascript
-   // Bar chart data shape
-   [{ generation: 'Label', male: number, female: number }, ...]
+**Purpose:** Find meaningful subpopulations that tell different stories when separated.
 
-   // Heatmap data shape (2D array + labels)
-   {
-     rowLabels: ['Gen 1', 'Gen 2', ...],
-     colLabels: ['Trend A', 'Trend B', ...],
-     data: [[val, val, ...], [val, val, ...], ...]
-   }
+1. Start with the broadest grouping from Phase 1 (e.g., "adult entertainment workers")
+2. Search for: "types of [group]" OR "[group] subcategories" OR "[group] classification"
+3. For each candidate subgroup found:
+   - Search for data comparing the subgroup to the parent group on 2-3 key metrics
+   - **Split test:** If the subgroup differs by >20% on any key metric, it's a meaningful split
+   - **Merge test:** If <20% difference across all metrics, keep merged
+4. **Max depth: 2 levels** of splitting (prevents infinite subdivision)
+5. **Max subgroups: 5** per population (prevents over-fragmentation)
 
-   // Time series data shape
-   [{ year: number, rate: number }, ...]
-   ```
+**Example:** "adult entertainment workers" →
+- Search finds: pornstars, cam performers, OnlyFans creators, strippers, phone sex operators
+- Data shows pornstars and cam performers have very different career lengths, revenue models, and health outcomes (>20% differences)
+- Strippers have limited research data available
+- Decision: Split into pornstars + cam performers. Note strippers as data-limited.
 
-2. **Populate datasets** from research findings. Rules:
-   - Use consistent units within each dataset (all percentages, all counts, etc.)
-   - Round appropriately (1 decimal for averages, integers for percentages)
-   - Use null for genuinely missing data (not 0 — zero means measured and zero)
-   - Keep generation/group labels consistent across all datasets
+### 3B: Core Metric Identification
 
-3. **Create the data file(s).** Write as ES module exports:
-   ```javascript
-   // src/data/researchData.js
-   export const GROUPS = [...];
-   export const metricOneData = [...];
-   export const metricTwoData = [...];
-   export const TREND_LABELS = [...];
-   export const trendMatrix = { group1: { subgroup: [...] }, ... };
-   export const sources = [...];
-   ```
+**Purpose:** Determine the obvious metrics for this domain without user specification.
 
-4. **Validate data integrity:**
-   - All arrays in a heatmap row must be the same length as the column labels
-   - All bar chart entries must have the same keys
-   - No NaN or undefined values (use null explicitly)
-   - Spot-check: do the numbers make intuitive sense?
+Apply the **Standard Research Dimensions Framework** based on the research lenses identified in Phase 1:
+
+**Universal dimensions (ALWAYS included for any topic):**
+- Temporal trends — how has X changed over time?
+- Demographic breakdown — who does X? (age, gender, geography)
+- Comparison to baseline — how does the studied group compare to the general population?
+
+**Population lens dimensions (when studying people):**
+- Population size and growth over time
+- Age distribution, gender split
+- Career/lifecycle metrics (entry age, duration, exit age) if applicable
+- Health outcomes (physical and mental)
+- Economic outcomes (income, financial stability)
+- Social outcomes (relationships, family, community)
+- Mortality/longevity if data exists
+
+**Behavior lens dimensions (when studying behaviors/trends):**
+- Prevalence rates by group and over time
+- Taxonomy of subtypes (discovered in 3C below)
+- Frequency and intensity measures
+- Motivations and drivers
+- Outcomes and correlations
+
+**Industry lens dimensions (when studying markets):**
+- Market size and growth
+- Revenue distribution (look for inequality patterns)
+- Worker demographics and conditions
+- Career outcomes and transitions
+- Regulatory landscape
+
+**Culture lens dimensions (when studying cultural phenomena):**
+- Generational attitude shifts
+- Media representation changes
+- Public opinion polling data
+- Regional/geographic variation
+
+### 3C: Taxonomy Discovery Protocol
+
+**Purpose:** Find the domain-specific category lists that the user couldn't possibly know to specify.
+
+For each dimension that has a categorical taxonomy (e.g., "types of sexual trends," "health conditions associated with X"):
+
+1. **Search for existing taxonomies:**
+   - "[dimension] categories list"
+   - "[dimension] classification [field]"
+   - "[dimension] types prevalence study"
+2. **Search for industry/platform categorizations:**
+   - Platform category lists (e.g., Pornhub categories, Spotify genres, job classification codes)
+   - Industry standard classifications
+3. **Cross-reference and compile** a unified list of 25-35 items per taxonomy
+4. **Rank by data availability** — prioritize items where prevalence data actually exists
+5. **Trim to top 25-30** most researchable items
+
+**Example:** For "sexual trends/kinks":
+- Academic sources provide: categories from Lehmiller's "Tell Me What You Want" survey
+- Platform data provides: Pornhub's annual category rankings
+- Cross-reference produces: ~30 categories with both academic and behavioral data
+
+### 3D: Synthesis Checkpoint
+
+After completing 3A-3C, compile a **Research Plan Summary**:
+
+```
+TOPIC: [interpreted topic]
+TIME AXIS: [chosen segmentation] — [list of periods]
+POPULATIONS: [discovered groups and subgroups]
+CORE METRICS: [auto-identified metrics per lens]
+TAXONOMIES DISCOVERED:
+  - [Category 1]: [N items] (e.g., "Sexual trends: 30 items")
+  - [Category 2]: [N items]
+PROPOSED DASHBOARD SECTIONS: [~5-8 sections with brief descriptions]
+KEY DATA SOURCES: [major studies/datasets identified]
+```
+
+**Present this to the user for lightweight approval:**
+- "Here's what I found and what I plan to build. Should I proceed, or would you like to adjust anything?"
+- User can say "yes," "also add X," "skip Y," or "looks good"
+- This is the ONLY required user interaction between the initial prompt and the final dashboard
 
 ### Output of Phase 3:
-- One or more structured data files ready for import
+- Complete research plan with all dimensions, groups, metrics, taxonomies
+- User approval to proceed
 
 ---
 
-## Phase 4: STRUCTURE — Build the Application Skeleton
+## Phase 4: RESEARCH — Deep Data Gathering
 
-**Goal:** Set up the web application with all dependencies and configuration.
-
-### Tech Stack (default — adjust per project needs):
-- **React 18** — component framework
-- **Vite 5** — build tool (fast dev server, instant HMR)
-- **Recharts** — charting library (bar, line, area, composed, radar, pie)
-- **Tailwind CSS 3** — utility-first styling
-- **Lucide React** — icon library
+**Goal:** Gather the best available data for every cell in the dimension matrix.
 
 ### Steps:
 
-1. **Create project directory** and initialize:
+1. **For each metric × group × time period**, search for data:
+   - "[metric] [group] [time period] study OR survey OR statistics"
+   - Fetch and extract key statistics
+   - Note: source, sample size, methodology, year, data quality tier
+
+2. **Data quality tiers** (tag every data point):
+
+   | Tier | Label | Description | Example |
+   |------|-------|-------------|---------|
+   | T1 | Gold | Peer-reviewed, large sample, nationally representative | GSS, Census, CDC NVSS |
+   | T2 | Silver | Institutional/industry report, moderate sample | Pew Research, platform reports |
+   | T3 | Bronze | Small study, self-selected sample, single source | Academic case study, survey of 200 |
+   | T4 | Estimate | Interpolated, proxy-based, or expert judgment | Gap-filling between known data points |
+
+3. **Cross-reference and triangulate:**
+   - Try to find 2-3 independent sources per data point
+   - When sources conflict, weight by: sample size > recency > methodology rigor
+   - Mark single-source data points clearly
+
+4. **Fill gaps with informed estimates** when necessary:
+   - Interpolate from adjacent data points
+   - Use proxy indicators
+   - Mark ALL estimates as T4 with explanation
+
+5. **For each taxonomy** (e.g., 30 sexual trends):
+   - Gather prevalence data per group × time period
+   - This produces the heatmap matrices
+   - Missing cells get null (not 0)
+
+6. **Track all sources** in structured citation list
+
+### Output of Phase 4:
+- Raw data organized by dimension
+- Source citations with quality tiers
+- Gap analysis (where data is strong vs weak)
+
+---
+
+## Phase 5: ANALYZE — Data-Driven Story & Visualization Selection
+
+**Goal:** Look at the collected data and determine the best way to present it. This is where visualization decisions are made — AFTER seeing the data, not before.
+
+### 5A: Key Findings Identification
+
+For each dataset, identify:
+- What's the most surprising finding?
+- Where are the biggest differences between groups?
+- What are the clearest temporal trends?
+- Are there any counterintuitive results?
+
+These become the **insight callouts** displayed below each chart group.
+
+### 5B: Visualization Auto-Selection
+
+Map each dataset to the optimal chart type using this deterministic framework:
+
+| Data Shape | Auto-Selected Chart Type |
+|---|---|
+| Metric × 2-6 discrete groups | Grouped Bar Chart |
+| Metric × 2-6 groups × 2 subgroups (e.g., gender) | Grouped Bar with color-coded subgroups |
+| Metric over continuous time (>8 points) | Line Chart |
+| Metric over time × multiple groups | Multi-line Chart |
+| Categorical + trend on same axis | Composed Chart (Bar + Line overlay) |
+| Ranked list of items (>8 items) | Horizontal Bar Chart |
+| 3+ groups compared on same set of metrics | Horizontal grouped bars |
+| Large taxonomy × multiple time periods (>100 cells) | Interactive Heatmap with color scale |
+| Heatmap data with clear rankings | Heatmap + Top-N ranked cards per period |
+| Small set of stats per group | Info/stat cards in grid |
+| Single metric over long time series | Area chart or line chart |
+
+### 5C: Dashboard Structure
+
+Organize sections by narrative flow:
+1. **Start broad** — overview metrics, population sizes, temporal context
+2. **Go deep on each subgroup** — demographics, career, economics
+3. **Compare outcomes** — health, social, economic comparisons across groups
+4. **Explore taxonomies** — heatmaps and ranked lists for discovered categories
+5. **Contextual data** — related societal metrics (e.g., divorce rates, cultural shifts)
+6. **End with sources** — citations, methodology, limitations
+
+Each section gets:
+- A title and subtitle with source context
+- 1-3 chart cards
+- An insight callout box with key findings
+- Filter controls where applicable (group toggle, gender toggle, time toggle)
+
+### Output of Phase 5:
+- Dashboard section plan with chart types assigned
+- Key findings per section
+- Filter/interaction plan
+
+---
+
+## Phase 6: BUILD — Scaffold and Implement
+
+**Goal:** Build the complete web application.
+
+### Tech Stack (default):
+- **React 18** — component framework
+- **Vite 5** — build tool
+- **Recharts** — charting library
+- **Tailwind CSS 3** — styling (dark theme default)
+- **Lucide React** — icons
+
+### Steps:
+
+1. **Create project structure:**
    ```
-   mkdir -p <project>/src/data
+   <project>/
+   ├── package.json
+   ├── vite.config.js
+   ├── tailwind.config.js
+   ├── postcss.config.js
+   ├── index.html
+   └── src/
+       ├── main.jsx
+       ├── index.css
+       ├── App.jsx
+       └── data/
+           └── researchData.js
    ```
 
-2. **Write configuration files:**
-   - package.json — dependencies and scripts
-   - vite.config.js — Vite configuration
-   - tailwind.config.js — Tailwind content paths
-   - postcss.config.js — PostCSS plugins
-   - index.html — entry HTML with font imports
+   For large projects (>6 sections), split into component files:
+   ```
+   └── src/
+       ├── components/
+       │   ├── Heatmap.jsx
+       │   ├── CustomTooltip.jsx
+       │   └── [SectionName].jsx
+       └── data/
+           ├── [dimension1].js
+           └── [dimension2].js
+   ```
 
-3. **Write entry files:**
-   - src/main.jsx — React DOM render
-   - src/index.css — Tailwind directives + custom styles
+2. **Write data files** as ES module exports with structured schemas:
+   - Bar chart data: `[{ label: string, group1: number, group2: number }, ...]`
+   - Heatmap data: `{ rowLabels: [...], colLabels: [...], data: [[...], ...] }`
+   - Time series: `[{ year: number, value: number }, ...]`
+   - Use `null` for missing data (never 0 for missing)
 
-4. **Install dependencies:**
+3. **Build reusable components:**
+   - **CustomTooltip** — dark themed, shows all values
+   - **Heatmap** — interactive, color-scaled, hover detail panel
+   - **InsightCallout** — colored box with key finding text
+
+4. **Build section components** per the Phase 5 plan
+
+5. **Build main App layout:**
+   - Sidebar navigation with icons per section
+   - Active section state management
+   - Filter controls where needed (group, gender, time toggles)
+
+6. **Install and verify:**
    ```bash
    npm install
-   ```
-
-5. **Verify clean start:**
-   ```bash
    npm run dev
    ```
 
-### Important Note on File Writing:
-When writing files to disk, if the write_to_file tool does not persist files reliably, fall back to writing files via shell commands using heredoc syntax:
-```bash
-cat > /path/to/file.js << 'ENDOFFILE'
-file contents here
-ENDOFFILE
-```
-Always verify files exist after writing with `ls -la` or `find`.
-
-### Output of Phase 4:
-- Running dev server with empty app shell
-
----
-
-## Phase 5: VISUALIZE — Build Chart Components
-
-**Goal:** Create all visualization components and wire them to data.
-
 ### Design Principles:
-- **Dark theme** by default (bg-gray-950, text-gray-100) — data viz pops on dark backgrounds
-- **Consistent color palette** — define COLORS constant, use consistently across all charts
-- **Gender coding:** Blue (#3b82f6) for male, Pink (#ec4899) for female (conventional in research viz)
-- **Group coding:** Assign distinct colors per occupation/population group
-- **Responsive:** All charts in ResponsiveContainer width="100%" height={N}
-- **Interactive:** Custom tooltips, hover states, filter toggles
-- **Annotated:** Every chart needs a title, subtitle with source context, and key findings callout
+- **Dark theme:** bg-gray-950, text-gray-100
+- **Consistent color palette:** Define COLORS constant, use everywhere
+- **Responsive:** All charts in `<ResponsiveContainer width="100%" height={N}>`
+- **Interactive:** Tooltips, hover states, filter toggles
+- **Annotated:** Every chart has title, subtitle, and insight callout
 
-### Component Patterns:
+### File Writing Note:
+If `write_to_file` tool doesn't persist reliably, fall back to shell heredoc:
+```bash
+cat > /path/to/file.js << 'EOF'
+contents
+EOF
+```
+Always verify with `ls -la` after writing.
 
-1. **Reusable CustomTooltip** — dark themed, shows all payload values
-2. **Reusable Heatmap** — for any 2D matrix with row/col labels, color scaling, hover detail
-3. **Section components** — one per dashboard tab, containing related charts + insights
-4. **Filter controls** — toggle buttons for group/gender/time selection
-5. **Insight callouts** — colored boxes with key findings below each chart group
-
-### Steps:
-
-1. **Build reusable components first:**
-   - CustomTooltip — shared across all Recharts charts
-   - Heatmap — for trend matrices (takes data, rowLabels, colLabels props)
-
-2. **Build section components** — one per tab/page:
-   - Each section = div with spacing containing:
-     - Section title + subtitle with source attribution
-     - 1-3 chart cards in grid layout
-     - Key findings callout box
-   - Chart cards contain:
-     - Chart title + description
-     - ResponsiveContainer wrapping the Recharts component
-     - Configured axes, tooltips, legends
-
-3. **Build the main App layout:**
-   - Sidebar navigation with section links + icons
-   - Main content area rendering the active section
-   - useState for active section toggle
-
-4. **For heatmap + ranked list sections** (trend analysis):
-   - Add group toggle (e.g., General Pop / Cam / Pornstar)
-   - Add gender toggle (Male / Female)
-   - Heatmap renders the selected slice
-   - Below heatmap: grid of Top N ranked cards per generation
-   - Each card shows sorted trends with mini progress bars
-
-### Output of Phase 5:
-- Fully functional interactive dashboard with all charts rendering
+### Output of Phase 6:
+- Running dev server with complete dashboard
 
 ---
 
-## Phase 6: PRESENT — Polish, Validate, and Deliver
+## Phase 7: PRESENT — Polish, Validate, Deliver
 
-**Goal:** Final quality pass and delivery.
+**Goal:** Final quality pass.
 
 ### Steps:
 
-1. **Visual QA:**
-   - Check every chart renders with correct data
-   - Verify axis labels are not cut off (adjust angle, height, width)
-   - Confirm tooltips show correct values
-   - Test all toggle/filter combinations
-   - Check responsive behavior at different widths
-
-2. **Content QA:**
-   - Verify key findings text is accurate to the data shown
-   - Check source citations are complete
-   - Add methodological limitations section
-   - Ensure all estimates are clearly marked as such
-
-3. **Build test:**
+1. **Build test:**
    ```bash
    npx vite build
    ```
-   - Must complete with zero errors
-   - Note any chunk size warnings (acceptable, not blocking)
+   Must complete with zero errors.
 
-4. **Deliver to user:**
-   - Start dev server and provide browser preview
-   - Summarize all sections and what data they contain
-   - Note any data gaps or limitations
+2. **Visual QA:**
+   - Every chart renders with correct data
+   - Axis labels not cut off
+   - Tooltips show correct values
+   - All filter combinations work
+   - Heatmap hover details accurate
+
+3. **Content QA:**
+   - Key findings match the data
+   - Source citations complete
+   - Methodological limitations documented
+   - All T4 estimates clearly marked
+
+4. **Deliver:**
+   - Start dev server + browser preview
+   - Summarize all sections and their contents
+   - Note data gaps or limitations
    - Offer to deploy if requested
 
 ---
 
-## Appendix A: Chart Type Decision Guide
+## Appendix A: Standard Research Dimensions Framework
 
-| Data Shape | Best Chart Type |
+This framework ensures consistent, comprehensive coverage without user specification. Apply based on research lenses detected in Phase 1.
+
+### Always Include:
+| Dimension | What to Gather |
 |---|---|
-| X by Group (2-6 groups) | Grouped Bar Chart |
-| X by Group by Subgroup | Grouped Bar with color coding |
-| X over continuous time | Line Chart |
-| X over time + by group | Multi-line Chart |
-| Bars + trend overlay | Composed Chart (Bar + Line) |
-| Ranked list of items | Horizontal Bar Chart |
-| 3-group comparison on same metrics | Horizontal grouped bars |
-| Large matrix (N trends x M groups) | Heatmap with color scale |
-| Distribution/profile | Radar Chart |
-| Part-of-whole | Pie/Donut (use sparingly) |
+| Temporal trends | How has the core metric changed over the chosen time axis? |
+| Demographics | Age, gender, geography, education, income of relevant populations |
+| Baseline comparison | General population numbers for every metric measured in subgroups |
 
-## Appendix B: Color Palette Template
+### Population Lens:
+| Dimension | What to Gather |
+|---|---|
+| Population size | How many people, growth/decline over time |
+| Career/lifecycle | Entry age, duration, exit age, transitions (if applicable) |
+| Health outcomes | Physical and mental health conditions, mortality |
+| Economic outcomes | Income, revenue, financial stability, inequality |
+| Social outcomes | Relationships, family, community, stigma |
+
+### Behavior Lens:
+| Dimension | What to Gather |
+|---|---|
+| Prevalence | How common, by group, over time |
+| Taxonomy | Subcategories/types (discover via Taxonomy Discovery Protocol) |
+| Frequency | How often, intensity measures |
+| Outcomes | Consequences, correlations, risk factors |
+
+### Industry Lens:
+| Dimension | What to Gather |
+|---|---|
+| Market size | Total revenue, number of workers, growth rate |
+| Revenue distribution | By percentile, inequality metrics (Gini, top 1% share) |
+| Worker conditions | Safety, regulation, career outcomes |
+| Subindustry segments | Meaningful splits within the industry |
+
+### Culture Lens:
+| Dimension | What to Gather |
+|---|---|
+| Generational attitudes | How do different cohorts view this topic? |
+| Media representation | How is this portrayed in media over time? |
+| Public opinion | Polling data, acceptance/stigma trends |
+| Policy/legal | Regulatory changes, legal status over time |
+
+## Appendix B: Visualization Auto-Selection Rules
+
+These rules are DETERMINISTIC — the same data shape always produces the same chart type.
+
+| Data Shape | Chart Type | When to Use |
+|---|---|---|
+| Metric × 2-6 groups | Grouped Bar | Comparing discrete categories |
+| Metric × 2-6 groups × 2 subgroups | Grouped Bar (color-coded) | Adding gender/subgroup dimension |
+| Metric × >6 groups | Horizontal Bar | Too many groups for vertical bars |
+| Metric over time (>8 points) | Line Chart | Continuous temporal trends |
+| Metric over time × groups | Multi-line | Comparing trends across groups |
+| Categorical + continuous on same axis | Composed (Bar + Line) | e.g., entry age bars + career length line |
+| 3+ groups × same metrics | Horizontal grouped bars | Side-by-side outcome comparison |
+| Large taxonomy × periods (>100 cells) | Heatmap + Top-N cards | Trend/category matrices |
+| Small stat set per group | Info cards grid | Summary statistics |
+| Single long time series | Line or Area chart | Historical trends |
+| Part-of-whole | Donut (use sparingly) | Composition breakdowns |
+
+## Appendix C: Color Palette Template
 
 ```javascript
 const COLORS = {
-  // Gender
+  // Gender (conventional in research visualization)
   male: '#3b82f6',        // Blue
   female: '#ec4899',      // Pink
 
-  // Groups (assign as needed)
-  group1: '#6366f1',      // Indigo
-  group2: '#10b981',      // Emerald
-  group3: '#f59e0b',      // Amber
+  // Groups (assign sequentially as discovered)
+  group1: '#6366f1',      // Indigo — general population / baseline
+  group2: '#10b981',      // Emerald — subgroup 1
+  group3: '#f59e0b',      // Amber — subgroup 2
+  group4: '#ef4444',      // Red — subgroup 3
 
   // Accents
   accent1: '#8b5cf6',     // Purple
@@ -335,64 +529,38 @@ const COLORS = {
 };
 ```
 
-## Appendix C: Data Quality Tiers
+## Appendix D: Subgroup Split Decision Matrix
 
-When compiling data, tag each data point with a confidence tier:
+Use this to decide whether to split a population into subgroups:
 
-| Tier | Description | Example |
-|---|---|---|
-| **T1 — Gold** | Peer-reviewed, large sample, nationally representative | GSS, Census, CDC NVSS |
-| **T2 — Silver** | Institutional/industry report, moderate sample | Pew Research, platform reports |
-| **T3 — Bronze** | Small study, self-selected sample, single source | Academic case study, survey of 200 |
-| **T4 — Estimate** | Interpolated, proxy-based, or expert judgment | Gap-filling between known data points |
+| Signal | Action |
+|---|---|
+| >20% difference on 2+ key metrics between subgroups | SPLIT — they tell different stories |
+| >20% difference on 1 metric only | SPLIT if the metric is central to the topic; otherwise MERGE |
+| <20% difference across all metrics | MERGE — splitting adds noise without insight |
+| Subgroup has <3 data sources available | NOTE as data-limited; include if possible, caveat if not |
+| >5 potential subgroups | Keep top 3-4 most distinct; merge the rest into "other" |
+| Subgroup only exists for part of the time axis | Include with clear notation (e.g., "cam performers: Gen X onward") |
 
-Always disclose tier in the Sources and Methods section.
+## Appendix E: Taxonomy Discovery Search Templates
 
-## Appendix D: File Structure Template
-
-```
-<project>/
-├── package.json
-├── vite.config.js
-├── tailwind.config.js
-├── postcss.config.js
-├── index.html
-├── src/
-│   ├── main.jsx
-│   ├── index.css
-│   ├── App.jsx
-│   └── data/
-│       └── researchData.js
-```
-
-For very large projects, split into multiple data files and component files:
+Use these search patterns to discover domain-specific category lists:
 
 ```
-├── src/
-│   ├── data/
-│   │   ├── demographics.js
-│   │   ├── trends.js
-│   │   ├── health.js
-│   │   └── sources.js
-│   ├── components/
-│   │   ├── Heatmap.jsx
-│   │   ├── CustomTooltip.jsx
-│   │   ├── SectionOne.jsx
-│   │   └── SectionTwo.jsx
-│   └── App.jsx
+"[topic] categories list"
+"[topic] types classification"
+"[topic] taxonomy [academic field]"
+"most common [topic items] prevalence study"
+"[platform] [topic] categories" (e.g., "Pornhub categories", "Spotify genres")
+"[topic] survey categories [major study name]"
+"top [N] [topic items] by [metric]"
 ```
 
-## Appendix E: PaperBanana Integration (Optional)
+Cross-reference 2-3 sources to build a unified list of 25-30 items. Prioritize items with available prevalence data.
 
-For publication-quality static figures (e.g., for embedding in papers/PDFs), consider using PaperBanana (https://paperbanana.org/) as a complementary rendering step. PaperBanana uses a Retrieve-Plan-Render-Refine agent pipeline to produce academic-grade illustrations from text descriptions. It handles the last-mile figure polishing, while this workflow handles the full research-to-dashboard pipeline.
+## Appendix F: PaperBanana Integration (Optional)
 
-Use PaperBanana when:
-- You need static publication-ready figures for a paper or PDF report
-- You want methodology diagrams or flowcharts alongside data viz
-- The output needs to match specific journal/conference style guides
+For publication-quality static figures, consider PaperBanana (https://paperbanana.org/) as a complementary last-mile rendering step. It uses Retrieve-Plan-Render-Refine agents for academic-grade illustrations.
 
-Use this workflow when:
-- You need an interactive, explorable dashboard
-- The research phase is part of the deliverable
-- You want filterable, multi-dimensional data exploration
-- The audience will consume it in a browser
+Use PaperBanana when: static figures for papers/PDFs, journal style compliance needed.
+Use this workflow when: interactive dashboards, research discovery is part of the deliverable, browser-based consumption.
