@@ -2,6 +2,8 @@
 
 An intelligent agentic AI skill that takes a simple research topic and autonomously discovers dimensions, metrics, subgroups, and taxonomies — then produces a polished interactive web dashboard with statistical visualizations.
 
+Includes a **Product/Purchase specialization** that auto-detects when a user wants to compare products or make a buying decision, and scaffolds a comprehensive product comparison dashboard with specs, pricing, cost analysis, recommendations, purchase links, and data-driven analysis.
+
 ## The Problem This Solves
 
 Traditional research visualization requires the user to already know:
@@ -18,14 +20,15 @@ This skill flips that. You give it a topic in plain English. It figures out the 
 
 ```
 INTERPRET → SURVEY → DISCOVER → RESEARCH → ANALYZE → BUILD → PRESENT
-                                    ↓
-                            User Checkpoint
-                       (lightweight approval)
+    ↓                               ↓
+  Product lens?                User Checkpoint
+    ↓ yes                    (lightweight approval)
+  PRODUCT CLASSIFY
 ```
 
 | Phase | What Happens | User Effort |
 |-------|-------------|-------------|
-| **INTERPRET** | Parses natural language into topic, populations, time scope, research lenses | None |
+| **INTERPRET** | Parses natural language into topic, populations, time scope, research lenses. Auto-detects Product/Purchase intent. | None |
 | **SURVEY** | Broad literature scan — finds major studies, datasets, known dimensions | None |
 | **DISCOVER** | Finds meaningful subgroups, core metrics, domain taxonomies (25-30 items per category) | None |
 | *Checkpoint* | *Agent presents: "Here's what I found. Here's my plan. Proceed?"* | *"Yes" or adjust* |
@@ -35,6 +38,8 @@ INTERPRET → SURVEY → DISCOVER → RESEARCH → ANALYZE → BUILD → PRESENT
 | **PRESENT** | QA, build test, browser preview delivery | Review |
 
 ## Example
+
+### General Research
 
 **What you type:**
 > Research sexual behavior trends and the adult entertainment industry across American generations
@@ -48,6 +53,22 @@ INTERPRET → SURVEY → DISCOVER → RESEARCH → ANALYZE → BUILD → PRESENT
 
 **What you get:**
 An 8-section interactive dashboard with ~20 charts, heatmaps, filters, insight callouts, and full source citations.
+
+### Product Comparison
+
+**What you type:**
+> I'm looking to buy a chainsaw
+
+**What the agent discovers on its own:**
+- Lifecycle: Durable/Investment (5+ year tool) → triggers TCO, Features Matrix, Avoid List
+- Market tiers: Entry/Homeowner, Farm & Ranch, Professional
+- Key specs: displacement, horsepower, weight, bar length, noise, vibration, crankcase material
+- Derived metrics: power-to-weight ratio, price per HP
+- 18 models across 6 brands with full specs, pros/cons, verdicts
+- Purchase links, retailer ratings, community sentiment
+
+**What you get:**
+An 8-section dashboard with sortable comparison table, scatter plots, cost analysis with 5-year TCO, features matrix, curated recommendations with award categories, and per-product detail pages with purchase links.
 
 ## Key Intelligence Features
 
@@ -63,6 +84,10 @@ Built-in methodology frameworks automatically include the right dimensions based
 - **Behavior studies** → prevalence, taxonomy, frequency, outcomes
 - **Industry studies** → market size, revenue distribution, worker conditions
 - **Culture studies** → generational attitudes, media representation, public opinion
+- **Product/Purchase studies** → specs, pricing, brand comparison, value analysis, purchase recommendations
+
+### Product Comparison Intelligence
+When a purchase intent is detected, the skill auto-classifies the product lifecycle (Durable/Semi-Durable/Consumable) and sets characteristic flags (Ecosystem Dependency, Multi-Use-Case, High Feature Density, etc.) that drive which dashboard sections get built. A chainsaw dashboard includes 5-year TCO analysis because chainsaws last decades; a blower dashboard skips TCO because they're replaceable — all decided automatically.
 
 ### Data-Driven Visualization
 Chart types are selected AFTER data collection based on data shape — not prescribed by the user beforehand. The same data shape always produces the same chart type (deterministic, not random).
@@ -87,13 +112,14 @@ The skill prevents inconsistent output through:
 
 ```
 research-visualizer/
-├── SKILL.md                              # Core skill instructions (218 lines)
+├── SKILL.md                              # Core skill instructions
 ├── README.md                             # This file
 └── references/
     ├── research-dimensions.md            # Standard Research Dimensions Framework
     ├── visualization-rules.md            # Chart type auto-selection rules + color palette
     ├── subgroup-discovery.md             # Split decision matrix + taxonomy search templates + data quality tiers
-    └── build-templates.md                # Tech stack, file structures, data schemas, component patterns
+    ├── build-templates.md                # Tech stack, file structures, data schemas, component patterns
+    └── product-comparison-template.md    # Product/Purchase specialization: lifecycle classification, section selection, data schemas, component patterns
 ```
 
 Follows the [agentskills.io specification](https://agentskills.io/specification):
