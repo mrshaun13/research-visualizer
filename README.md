@@ -19,23 +19,24 @@ This skill flips that. You give it a topic in plain English. It figures out the 
 ## How It Works
 
 ```
-INTERPRET → SURVEY → DISCOVER → RESEARCH → ANALYZE → BUILD → PRESENT
-    ↓                               ↓
-  Product lens?                User Checkpoint
-    ↓ yes                    (lightweight approval)
-  PRODUCT CLASSIFY
+ENVIRONMENT CHECK → INTERPRET → SURVEY → DISCOVER → RESEARCH → ANALYZE → BUILD → PRESENT
+       ↓                ↓                               ↓
+  Hub exists?       Product lens?                User Checkpoint
+    ↓ no               ↓ yes                    (lightweight approval)
+  FIRST-TIME SETUP  PRODUCT CLASSIFY
 ```
 
 | Phase | What Happens | User Effort |
 |-------|-------------|-------------|
+| **ENVIRONMENT CHECK** | Detects existing Research Hub install or walks through first-time setup | None (or pick install location once) |
 | **INTERPRET** | Parses natural language into topic, populations, time scope, research lenses. Auto-detects Product/Purchase intent. | None |
 | **SURVEY** | Broad literature scan — finds major studies, datasets, known dimensions | None |
 | **DISCOVER** | Finds meaningful subgroups, core metrics, domain taxonomies (25-30 items per category) | None |
 | *Checkpoint* | *Agent presents: "Here's what I found. Here's my plan. Proceed?"* | *"Yes" or adjust* |
 | **RESEARCH** | Deep data gathering with source triangulation and quality tiers | None |
 | **ANALYZE** | Identifies key findings, auto-selects chart types from data shape | None |
-| **BUILD** | Scaffolds React app, builds all components, wires data | None |
-| **PRESENT** | QA, build test, browser preview delivery | Review |
+| **BUILD** | Builds project into the Research Hub — no new servers, no new installs | None |
+| **PRESENT** | QA, build test, refresh browser or start hub server | Review |
 
 ## Example
 
@@ -69,6 +70,83 @@ An 8-section interactive dashboard with ~20 charts, heatmaps, filters, insight c
 
 **What you get:**
 An 8-section dashboard with sortable comparison table, scatter plots, cost analysis with 5-year TCO, features matrix, curated recommendations with award categories, and per-product detail pages with purchase links.
+
+## Research Hub — Multi-Project Management
+
+Every research dashboard you create lives in a single **Research Hub** — one web app, one server, one port. No more juggling multiple dev servers or reinstalling dependencies for each topic.
+
+### How It Works
+
+- **First run**: The skill detects it's your first time, asks where to install the hub (default: `~/research-hub/`), scaffolds the app, and installs dependencies once.
+- **Every run after**: The skill finds your existing hub in under 2 seconds, builds the new research directly into it, and tells you to refresh your browser. That's it.
+
+### The Experience
+
+The hub provides a **ChatGPT-style interface**:
+
+- **Collapsible sidebar** on the left lists all your research projects, sorted newest-first
+- **Search** across project titles and original queries
+- **Home page** shows all projects as cards with title, description, research lens badge, and the original query you asked
+- **Click any project** to dive into its full interactive dashboard — each project retains its own internal navigation, charts, and filters
+- **One port (5180)** — bookmark it, it never changes
+
+### Dive Deeper with Your AI Agent
+
+The hub isn't just a viewer — it's a launchpad. Since every project's data and components live in a structured directory under the hub, you can ask your AI agent to:
+
+- **Add sections** to an existing research project ("Add a section comparing X to Y in my chainsaw dashboard")
+- **Update data** when new information is available ("Update the pricing in my chainsaw comparison")
+- **Cross-reference** between projects ("How does the Cisco acquisition timeline compare to...")
+- **Extend analysis** with new dimensions you didn't think of initially
+
+The agent knows where everything lives because the hub's `config.json` tracks every project with its slug, path, original query, and research lens.
+
+### Config & Detection
+
+| File | Location | Purpose |
+|------|----------|--------|
+| `config.json` | `~/.codeium/windsurf/skills/research-visualizer/config.json` | Installation marker — stores hub path, port, and all project metadata |
+| `projects/index.js` | `<hubPath>/src/projects/index.js` | Runtime registry — lazy imports and metadata for the React app |
+| Project files | `<hubPath>/src/projects/<slug>/` | Each project's App.jsx, components/, and data/ |
+
+### Project Telemetry
+
+Every research project automatically captures telemetry about its creation — not about the research content, but about the research *process*. This metadata is displayed on the hub home page so you can see at a glance how each project was built.
+
+**Per-project stats shown on cards:**
+
+*Impact & Accessibility:*
+- **Hours saved** (highlighted) — estimated manual effort to produce the same research + dashboard, with human-readable equivalent (e.g., "~3 weeks full-time"). Includes breakdowns for alternative output formats (white paper, blog post, RFC, presentation, GitHub repo)
+- **Flesch-Kincaid grade level** — readability score for all dashboard text content (e.g., "9th Grade", "College")
+- **Bloom's Taxonomy level** — cognitive depth of the content (Remember → Understand → Apply → Analyze → Evaluate → Create), color-coded by level
+- **Time to consume** — estimated reading time for a human to fully absorb all content, adjusted for readability level and chart exploration time
+
+*Build metrics:*
+- **AI build time** — how long the full pipeline took from prompt to dashboard
+- **Web searches** — total searches performed across all phases
+- **Sources cited** — unique sources referenced in the final dashboard
+- **Charts built** — number of individual visualizations
+- **Sections** — dashboard sections created
+- **Products compared** — product count (Product lens only)
+- **Skill version** — which version of the skill produced this research
+- **Setup badge** — whether the hub was first installed during this run
+- **LLM model** — which model powered the research (when detectable)
+
+**Aggregate stats in the hero section:**
+- Total hours saved across all projects (highlighted in green)
+- Total AI build time, web searches, sources, charts, data points, and products compared
+
+**Also captured but stored in config (not displayed on cards):**
+- **Original prompt** — the exact text you typed to trigger the skill
+- **Research plan** — the full checkpoint text you approved before the build
+- **Checkpoint modified** — whether you requested changes at the checkpoint
+- **Phase timing breakdown** — per-phase duration (environment, interpret, survey, discover, research, analyze, build, present)
+- **Data points collected** — approximate count of individual data values gathered
+- **Files generated** — total files written to the project directory
+- **Token usage** — approximate tokens consumed (when available from runtime)
+- **Hours saved by format** — estimated production hours for each alternative output format (white paper, blog post, technical doc, presentation, GitHub repo)
+- **Consumption time breakdown** — reading minutes, chart exploration minutes, interactive overhead minutes
+- **Content analysis details** — total words, total sentences, Bloom's range, readability note
 
 ## Key Intelligence Features
 
@@ -112,9 +190,11 @@ The skill prevents inconsistent output through:
 
 ```
 research-visualizer/
-├── SKILL.md                              # Core skill instructions
+├── SKILL.md                              # Core skill instructions (v4.0)
 ├── README.md                             # This file
+├── config.json                           # Hub installation config (created on first run)
 └── references/
+    ├── hub-architecture.md               # Research Hub: config schema, directory structure, project registry
     ├── research-dimensions.md            # Standard Research Dimensions Framework
     ├── visualization-rules.md            # Chart type auto-selection rules + color palette
     ├── subgroup-discovery.md             # Split decision matrix + taxonomy search templates + data quality tiers

@@ -11,7 +11,7 @@ description: >
 compatibility: Requires internet access for web search and data fetching.
 metadata:
   author: mrshaun13
-  version: "3.0"
+  version: "4.0"
 ---
 
 # Deep Research → Interactive Dashboard Pipeline
@@ -28,13 +28,86 @@ Takes a simple research topic from a user, autonomously discovers dimensions, me
 ## Pipeline
 
 ```
-INTERPRET → SURVEY → DISCOVER → RESEARCH → ANALYZE → BUILD → PRESENT
-    ↓                               ↓
-  Product lens?                User Checkpoint
-    ↓ yes
-  PRODUCT CLASSIFY
-    (lifecycle, flags, user profile)
+ENVIRONMENT CHECK → INTERPRET → SURVEY → DISCOVER → RESEARCH → ANALYZE → BUILD → PRESENT
+       ↓                ↓                               ↓
+  Hub exists?       Product lens?                User Checkpoint
+    ↓ no               ↓ yes
+  FIRST-TIME SETUP  PRODUCT CLASSIFY
+                      (lifecycle, flags, user profile)
 ```
+
+---
+
+## Phase 0: ENVIRONMENT CHECK — Detect or Set Up Research Hub
+
+Before any research begins, check whether the Research Hub is already installed. The hub is a single web application that hosts ALL research dashboards in one place, eliminating the need for multiple dev servers and installs.
+
+See [hub-architecture.md](references/hub-architecture.md) for the complete config schema, directory structure, and project registry format.
+
+### Detection
+
+1. **Check for config file:** `~/.codeium/windsurf/skills/research-visualizer/config.json`
+2. **If config exists:**
+   - Read `hubPath` from config
+   - Verify the hub directory exists at that path
+   - Check if a Vite dev server is already running on the configured port (default 5180): `lsof -i :<port>` or `ps aux | grep vite`
+   - If server is running: note it — you will tell the user to refresh their browser at the end
+   - If server is not running: you will start it at the end
+   - **Skip to Phase 1** — the hub is ready, proceed with research
+3. **If config does NOT exist → First-Time Setup (Phase 0B)**
+
+### Phase 0B: First-Time Setup
+
+This runs ONCE, the very first time the skill is invoked.
+
+1. **Inform the user immediately:**
+   > "I see this is your first time running Research Visualizer. I'll set up a **Research Hub** — a single web app that will host all your research dashboards in one place. You'll never need multiple dev servers again."
+
+2. **Ask for hub location:**
+   > "Where would you like to install the Research Hub? Default: `~/research-hub/`"
+   - Accept the user's choice or use the default
+   - The path must be absolute
+
+3. **Scaffold the hub app** at the chosen location using the structure defined in [hub-architecture.md](references/hub-architecture.md):
+   - `package.json` — with React 18, Vite 5, Recharts, Tailwind CSS 3, Lucide React
+   - `vite.config.js` — configured with the chosen port (default 5180)
+   - `tailwind.config.js`, `postcss.config.js`, `index.html`
+   - `src/main.jsx`, `src/index.css`
+   - `src/App.jsx` — Hub shell with ChatGPT-style collapsible sidebar + project routing
+   - `src/components/HubHome.jsx` — Landing page with project cards grid
+   - `src/projects/index.js` — Empty project registry (will be populated as projects are added)
+
+4. **Run `npm install`** in the hub directory
+
+5. **Create config.json** at `~/.codeium/windsurf/skills/research-visualizer/config.json`:
+   ```json
+   {
+     "version": "1.0",
+     "created": "<ISO timestamp>",
+     "hubPath": "<chosen path>",
+     "port": 5180,
+     "projects": []
+   }
+   ```
+
+6. **Continue to Phase 1** with the user's research request.
+
+### Telemetry: Phase 0 Capture
+
+At the start of Phase 0, initialize the telemetry object that will be built up throughout the run:
+
+1. **Record `runStartedAt`** — current ISO 8601 timestamp
+2. **Record `skillVersion`** — read from this file's frontmatter (currently "4.0")
+3. **Record `model`** — note the current LLM model if detectable (optional, set null if unknown)
+4. **Set `includedSetup`** — `true` if Phase 0B runs, `false` if hub already existed
+5. **Initialize counters** — `searchesPerformed: 0`, phase timing tracker
+6. **Start phase timer** for `phaseTiming.environment`
+
+See [hub-architecture.md](references/hub-architecture.md) for the complete telemetry schema.
+
+### Key Principle
+
+Phase 0 should be **fast**. If the hub exists, it's a 2-second check. If it's first-time, the setup conversation is brief and then research proceeds normally.
 
 ---
 
@@ -72,6 +145,8 @@ Parse natural language into research parameters. No structured input required.
 - Explicit: "buy", "purchase", "looking for", "which should I get", "help me choose", "best [product] for"
 - Implicit: mentions of brands, models, price ranges, product categories, "compare [products]"
 - Context: any request where the end goal is selecting a product to acquire
+
+**Telemetry:** Record `userPrompt` — the exact original text the user provided, before any interpretation. End `phaseTiming.interpret` timer.
 
 **Output:** Topic, populations, time scope, intent, lenses. If Product/Purchase lens is detected, proceed to Phase 1B. Otherwise, proceed directly to Phase 2.
 
@@ -254,6 +329,8 @@ DATA SOURCES: [review sites, manufacturer sites, community sources]
 Ask: "Here's what I found and plan to build. Should I proceed, or adjust anything?"
 This is the ONLY required user interaction between the initial prompt and the final dashboard.
 
+**Telemetry:** Record `researchPlan` — the full checkpoint text shown above (standard or product format). Record `checkpointModified` — `true` if the user requested changes, `false` if they approved as-is. End `phaseTiming.discover` timer. Also increment `searchesPerformed` with the count of web searches done in Phases 2-3.
+
 ---
 
 ## Phase 4: RESEARCH — Deep Data Gathering
@@ -371,49 +448,67 @@ Also build **multi-tier purchase options** (2-4 strategies):
 
 ---
 
-## Phase 6: BUILD — Scaffold and Implement
+## Phase 6: BUILD — Build Into Research Hub
 
-Build the complete web application using the default tech stack (React 18, Vite 5, Recharts, Tailwind CSS 3, Lucide React).
+All projects are built into the Research Hub — a single web application that hosts all research dashboards. **Never create a standalone Vite project.** The hub was set up in Phase 0.
 
-See [build-templates.md](references/build-templates.md) for file structures, data schemas, component patterns, and design principles.
+See [hub-architecture.md](references/hub-architecture.md) for the hub directory structure, config schema, and project registry format.
+See [build-templates.md](references/build-templates.md) for data schemas, component patterns, and design principles.
 
 ### Steps:
-1. Create project structure (standard or large based on section count)
-2. Write data files as ES module exports
-3. Build reusable components (CustomTooltip, Heatmap, InsightCallout)
-4. Build section components per Phase 5 plan
-5. Build main App with sidebar nav, section routing, filter controls
-6. Install dependencies and verify: `npm install && npm run dev`
+
+1. **Read config.json** to get `hubPath`
+2. **Generate a slug** for the new project (kebab-case from topic, e.g., "cisco-history-dashboard")
+3. **Create project directory:** `<hubPath>/src/projects/<slug>/`
+4. **Write project files** into that directory:
+   - `App.jsx` — the project's own App component with internal sidebar nav, section routing, filter controls
+   - `components/` — all section components (Overview, Sources, etc.)
+   - `data/` — all data files as ES module exports
+5. **Update the project registry** at `<hubPath>/src/projects/index.js`:
+   - Add a lazy import: `'<slug>': lazy(() => import('./<slug>/App'))`
+   - Add metadata entry to `projectRegistry` array (title, subtitle, slug, query, lens, icon, accentColor, createdAt)
+6. **Update config.json** — add the new project to the `projects` array with the same metadata + the original user query
+7. **Check dev server status:**
+   - If Vite is already running on the hub port → tell user to refresh their browser (Vite HMR will pick up new files)
+   - If Vite is NOT running → start it: `cd <hubPath> && npm run dev`
+8. **Open browser preview** on the hub's port
+
+### Project File Structure (within the hub):
+
+```
+<hubPath>/src/projects/<slug>/
+├── App.jsx                    # Project's own App with internal sidebar nav + section routing
+├── components/
+│   ├── CustomTooltip.jsx      # Dark-themed chart tooltips
+│   ├── InsightCallout.jsx     # Colored callout boxes
+│   ├── Overview.jsx           # Overview section
+│   ├── [SectionName].jsx      # Additional sections
+│   └── Sources.jsx            # Methodology, disclaimers
+└── data/
+    └── researchData.js        # All research data as ES module exports
+```
 
 **Product/Purchase lens additions to Phase 6:**
 
-When the Product/Purchase lens is active, use the product-specific file structure and component patterns from [product-comparison-template.md](references/product-comparison-template.md).
+When the Product/Purchase lens is active, use the product-specific component patterns from [product-comparison-template.md](references/product-comparison-template.md).
 
-### Product Comparison File Structure:
+### Product Comparison File Structure (within the hub):
 
 ```
-<project>/
-├── package.json
-├── vite.config.js
-├── tailwind.config.js
-├── postcss.config.js
-├── index.html
-└── src/
-    ├── main.jsx
-    ├── index.css
-    ├── App.jsx                    # Sidebar nav + section routing + product detail routing
-    ├── components/
-    │   ├── CustomTooltip.jsx      # Dark-themed chart tooltips
-    │   ├── InsightCallout.jsx     # Colored callout boxes (info/warning/recommendation/critical/highlight)
-    │   ├── ComparisonTable.jsx    # Sortable/filterable table with expandable rows
-    │   ├── ProductDetail.jsx      # Full product deep-dive page (specs, links, ratings, pros/cons)
-    │   ├── RecommendationCards.jsx # Award cards with gradient backgrounds
-    │   ├── [MetricDeepDive].jsx   # Primary metric analysis (e.g., PowerPerformance, AirflowAnalysis)
-    │   ├── [ConditionalSection].jsx # TCO, FeaturesMatrix, UseCaseMatrix, Ecosystem, etc.
-    │   └── Sources.jsx            # Methodology, disclaimers
-    └── data/
-        ├── products.js            # Product array + constants (BRANDS, COLORS, TIERS, CATEGORIES)
-        └── productDetails.js      # Deep per-product info (specs, purchase links, ratings, reviews)
+<hubPath>/src/projects/<slug>/
+├── App.jsx                    # Sidebar nav + section routing + product detail routing
+├── components/
+│   ├── CustomTooltip.jsx
+│   ├── InsightCallout.jsx
+│   ├── ComparisonTable.jsx    # Sortable/filterable table with expandable rows
+│   ├── ProductDetail.jsx      # Full product deep-dive page
+│   ├── RecommendationCards.jsx
+│   ├── [MetricDeepDive].jsx   # e.g., PowerPerformance, AirflowAnalysis
+│   ├── [ConditionalSection].jsx # TCO, FeaturesMatrix, UseCaseMatrix, Ecosystem
+│   └── Sources.jsx
+└── data/
+    ├── products.js            # Product array + constants
+    └── productDetails.js      # Deep per-product info
 ```
 
 ### Product Comparison Build Order:
@@ -427,16 +522,89 @@ When the Product/Purchase lens is active, use the product-specific file structur
 7. **Conditional sections** — build only those flagged in Phase 1B (TCO, Features Matrix, Use Case Fit, Ecosystem)
 8. **Recommendations** — award cards, quick decision guide, multi-tier purchase options, avoid list (if Durable)
 9. **Sources** — methodology notes, pricing disclaimers, safety warnings (if applicable)
-10. **App shell** — sidebar nav with icons, section routing, ProductDetail routing, mobile responsive
+10. **App.jsx** — project-level sidebar nav with icons, section routing, ProductDetail routing, mobile responsive
+
+### Important: Store the User's Original Query
+
+When updating `config.json` and `projects/index.js`, always store the user's original natural-language query in the `query` field. This is displayed in the hub's project cards and sidebar so the user remembers what each research was about.
+
+### Telemetry: Phase 6 Capture
+
+After the build completes, count and record:
+
+1. **`sectionsBuilt`** — number of section components created (count files in components/ that are sections, not utilities)
+2. **`chartsBuilt`** — number of individual chart/visualization elements across all sections
+3. **`filesGenerated`** — total files written to the project directory (App.jsx + components + data files)
+4. **`sourcesCount`** — count unique sources referenced in the data files
+5. **`productsCompared`** — length of the products array (Product lens only, null otherwise)
+6. **`dataPointsCollected`** — approximate count of individual data values gathered during Phase 4
+7. **Increment `searchesPerformed`** — add any searches done during Phase 4 research
+8. **End `phaseTiming.build`** timer
 
 ---
 
 ## Phase 7: PRESENT — Polish, Validate, Deliver
 
-1. **Build test:** `npx vite build` — must complete with zero errors
+1. **Build test:** Run `npx vite build` from the hub directory — must complete with zero errors
 2. **Visual QA:** Every chart renders, axis labels visible, tooltips correct, all filters work
 3. **Content QA:** Findings match data, citations complete, limitations documented, T4 estimates marked
-4. **Deliver:** Start dev server + browser preview, summarize sections, note gaps, offer to deploy
+4. **Deliver to hub:**
+   - If dev server is already running → tell user: "Your new research is ready! Refresh your browser to see it in the Research Hub."
+   - If dev server is NOT running → start it from the hub directory (`npm run dev`) and open browser preview
+   - Summarize sections, note gaps, offer to deploy
+5. **Verify hub integration:** Confirm the new project appears in the hub sidebar and is navigable from the hub home page
+
+### Telemetry: Phase 7 Finalization
+
+After QA and delivery, finalize the telemetry object and persist it.
+
+See [hub-architecture.md](references/hub-architecture.md) for the complete schemas and estimation formulas.
+
+#### Step 1: Core Telemetry
+1. **Record `runCompletedAt`** — current ISO 8601 timestamp
+2. **Calculate `durationMinutes`** — difference between `runCompletedAt` and `runStartedAt`
+3. **End `phaseTiming.present`** timer
+4. **Record `tokenUsage`** — if available from the runtime environment, otherwise `null`
+
+#### Step 2: Content Analysis (Readability & Cognitive Depth)
+Analyze ALL text content in the built dashboard (insight callouts, section descriptions, data labels, tooltip text, recommendation text):
+1. **Count `totalWords` and `totalSentences`** across all components
+2. **Calculate `fleschKincaidGrade`** using: `0.39 × (words/sentences) + 11.8 × (syllables/words) − 15.59`
+3. **Assign `fleschKincaidLabel`** — map grade to label (e.g., 8.0 = "8th Grade", 13.0 = "College")
+4. **Assess `bloomsLevel`** — evaluate the dominant cognitive level of the content:
+   - Data display = Remember/Understand (1-2)
+   - Comparative analysis = Analyze (4)
+   - Recommendations/verdicts = Evaluate (5)
+5. **Set `bloomsRange`** — the full range of levels present (e.g., "Understand → Evaluate")
+6. **Write `readabilityNote`** — brief characterization (e.g., "College-prep level with data-driven analytical content")
+
+#### Step 3: Hours Saved Estimation
+Calculate the equivalent manual effort using build metrics:
+1. **`researchHours`** = `(sourcesCount × 0.75) + (dataPointsCollected × 0.02) + (searchesPerformed × 0.25)`
+2. **`productionHours`** — calculate for ALL six output formats:
+   - `interactive-dashboard` = `(sectionsBuilt × 6) + (chartsBuilt × 3) + (filesGenerated × 0.5)`
+   - `white-paper` = `(sectionsBuilt × 4) + (sourcesCount × 0.5) + (dataPointsCollected × 0.01)`
+   - `blog-post` = `(sectionsBuilt × 2.5) + (chartsBuilt × 1)`
+   - `technical-doc` = `(sectionsBuilt × 3) + (sourcesCount × 0.3)`
+   - `presentation` = `(sectionsBuilt × 1.5) + (chartsBuilt × 0.5)`
+   - `github-repo` = `(sectionsBuilt × 3) + (chartsBuilt × 2) + (filesGenerated × 0.5)`
+3. **`totalHoursSaved`** = `researchHours + productionHours['interactive-dashboard']`
+4. **`equivalentLabel`** — human-readable (e.g., "~2 weeks full-time")
+
+#### Step 4: Consumption Time
+Estimate how long a human reader would need to fully consume the dashboard:
+1. **`readingMinutes`** = `totalWords / (fleschKincaidGrade > 12 ? 120 : 150)`
+2. **`chartExplorationMinutes`** = `chartsBuilt × 0.75`
+3. **`interactiveOverheadMinutes`** = `(readingMinutes + chartExplorationMinutes) × 0.2`
+4. **`estimatedMinutes`** = sum of above three
+5. **`estimatedLabel`** — human-readable (e.g., "~45 min deep read")
+
+#### Step 5: Persist
+Write the complete telemetry object (including `contentAnalysis`, `hoursSaved`, `consumptionTime`) to both:
+- `config.json` → under the project's `telemetry` field
+- `projects/index.js` → in the project's registry entry as a `telemetry` property
+
+Verify the hub home page displays all telemetry stats on the project card.
 
 **Product/Purchase lens additions to Phase 7:**
 
@@ -472,3 +640,8 @@ When the Product/Purchase lens is active, use the product-specific file structur
 | Product lens: user's product category is ambiguous | Ask: "Are you looking for [interpretation A] or [interpretation B]?" before proceeding |
 | Product lens: no clear market tiers exist | Use price-based segmentation (Budget/Mid/Premium) or skip tier system entirely |
 | Product lens: product is too niche (<5 options exist) | Include all available options; supplement with adjacent products or previous-gen models |
+| Hub: config.json exists but hubPath directory is missing | Re-run first-time setup (Phase 0B), preserve existing project entries from config |
+| Hub: dev server already running on the port | Skip starting a new server; tell user to refresh browser |
+| Hub: project slug already exists in registry | Ask user: overwrite existing project or choose a new name? |
+| Hub: npm install fails in hub directory | Check node/npm versions, clear node_modules and retry, check for lockfile conflicts |
+| Hub: new project doesn't appear after refresh | Verify projects/index.js was updated correctly, check for import errors in browser console |
