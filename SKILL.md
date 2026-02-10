@@ -8,6 +8,7 @@ description: >
   products or make a buying decision, and scaffolds a comprehensive product comparison dashboard
   with specs, pricing, recommendations, purchase links, and data-driven analysis.
   Handles the full pipeline from research discovery through interactive React dashboard delivery.
+license: MIT
 compatibility: Requires internet access for web search and data fetching.
 metadata:
   author: mrshaun13
@@ -92,18 +93,7 @@ This runs ONCE, the very first time the skill is invoked.
 
 6. **Continue to Phase 1** with the user's research request.
 
-### Telemetry: Phase 0 Capture
-
-At the start of Phase 0, initialize the telemetry object that will be built up throughout the run:
-
-1. **Record `runStartedAt`** — current ISO 8601 timestamp
-2. **Record `skillVersion`** — read from this file's frontmatter (currently "4.0")
-3. **Record `model`** — note the current LLM model if detectable (optional, set null if unknown)
-4. **Set `includedSetup`** — `true` if Phase 0B runs, `false` if hub already existed
-5. **Initialize counters** — `searchesPerformed: 0`, phase timing tracker
-6. **Start phase timer** for `phaseTiming.environment`
-
-See [hub-architecture.md](references/hub-architecture.md) for the complete telemetry schema.
+**Telemetry:** Initialize the telemetry object at the start of this phase. See [hub-architecture.md](references/hub-architecture.md#telemetry-schema) for the complete schema, capture timing, and formulas.
 
 ### Key Principle
 
@@ -146,8 +136,6 @@ Parse natural language into research parameters. No structured input required.
 - Explicit: "buy", "purchase", "looking for", "which should I get", "help me choose", "best [product] for"
 - Implicit: mentions of brands, models, price ranges, product categories, "compare [products]"
 - Context: any request where the end goal is selecting a product to acquire
-
-**Telemetry:** Record `userPrompt` — the exact original text the user provided, before any interpretation. End `phaseTiming.interpret` timer.
 
 **Output:** Topic, populations, time scope, intent, lenses. If Product/Purchase lens is detected, proceed to Phase 1B. Otherwise, proceed directly to Phase 2.
 
@@ -216,29 +204,7 @@ Understand the research landscape before diving deep.
    
    **Guiding principle:** The best segmentation is the one where the data looks *different* on either side of the boundary. If a timeline split doesn't reveal a meaningful change, it's the wrong split.
 
-**Product/Purchase lens additions to Phase 2:**
-
-When the Product/Purchase lens is active, replace or augment the standard searches with:
-
-1. **Conduct 3-5 product-focused searches:**
-   - "best [product type] [current year]"
-   - "[product type] comparison review [current year]"
-   - "[product type] buyer's guide"
-   - "[product type] reddit recommendations"
-   - "[brand] [product type] specs"
-
-2. **Identify from results:**
-   - Major brands and their market positioning
-   - Key differentiating specs for this product type
-   - Price tiers and value breakpoints
-   - Expert review sources and independent testing labs
-   - Common complaints and praise patterns
-   - Ecosystem dependencies (batteries, platforms, accessories)
-
-3. **Determine product segmentation:**
-   - **Market tiers** — entry/mid/pro, economy/mid/luxury, budget/mainstream/premium
-   - **Power types** — gas/battery/corded, manual/electric, etc.
-   - **Use case categories** — if products serve different scenarios
+**Product/Purchase lens:** See [product-comparison-template.md](references/product-comparison-template.md#phase-2-additions-product-survey) for product-specific search patterns and segmentation.
 
 **Output:** Major data sources, preliminary dimensions, temporal segmentation (or product segmentation for Product lens). Proceed to Phase 3.
 
@@ -342,8 +308,6 @@ DATA SOURCES: [review sites, manufacturer sites, community sources]
 Ask: "Here's what I found and plan to build. Should I proceed, or adjust anything?"
 This is the ONLY required user interaction between the initial prompt and the final dashboard.
 
-**Telemetry:** Record `researchPlan` — the full checkpoint text shown above (standard or product format). Record `checkpointModified` — `true` if the user requested changes, `false` if they approved as-is. End `phaseTiming.discover` timer. Also increment `searchesPerformed` with the count of web searches done in Phases 2-3.
-
 ---
 
 ## Phase 4: RESEARCH — Deep Data Gathering
@@ -359,32 +323,7 @@ Gather data for every cell in the dimension matrix.
 
 See [subgroup-discovery.md](references/subgroup-discovery.md) for data quality tier definitions.
 
-**Product/Purchase lens additions to Phase 4:**
-
-When the Product/Purchase lens is active, the research phase focuses on per-product data gathering:
-
-1. **For each product on the shortlist**, gather the complete data object per the schema in [product-comparison-template.md](references/product-comparison-template.md):
-   - All numeric specs (8-15 per product)
-   - Pre-calculate derived metrics
-   - Boolean features (if Features Matrix flagged)
-   - Use case ratings 1-5 (if Multi-Use-Case flagged)
-   - Qualitative data: bestFor, prosText, consText, verdict, highlights
-   - Sources list per product
-
-2. **Build the productDetails data** (separate file) for each product:
-   - Full manufacturer spec sheet (key-value pairs)
-   - Purchase links with retailer, URL, price, stock status (2-3 retailers per product)
-   - Ratings with source, stars, review count, URL (2-3 sources per product)
-   - Pros and cons extracted from actual user reviews (not just spec-derived)
-
-3. **Gather ecosystem data** (if Ecosystem Dependency flagged):
-   - Tool count per ecosystem, voltage, battery range, average battery price, retailer availability
-
-4. **Gather TCO components** (if Durable/Semi-Durable lifecycle):
-   - Annual fuel/energy cost, annual maintenance cost, consumable costs, expected lifespan
-   - Assumptions clearly documented
-
-5. **Track all sources** — manufacturer sites, retailer listings, review sites, community forums, expert reviews
+**Product/Purchase lens:** See [product-comparison-template.md](references/product-comparison-template.md#phase-4-additions-product-data-gathering) for per-product data gathering, ecosystem data, and TCO components.
 
 ---
 
@@ -411,53 +350,7 @@ Organize by narrative flow:
 
 Each section: title + subtitle + 1-3 chart cards + insight callout + filters where applicable.
 
-**Product/Purchase lens additions to Phase 5:**
-
-When the Product/Purchase lens is active, replace the standard narrative flow with product-specific analysis:
-
-### 5A-P: Product Key Findings
-- **Best value discovery** — which product gives the most for the money?
-- **The "value paradox"** — is the cheapest to buy also the cheapest to own? (often not)
-- **Hidden gems** — products that experts love but casual buyers overlook
-- **Anti-recommendations** — products that look good on paper but have hidden downsides (Durable lifecycle only)
-- **Tradeoff identification** — the two most important competing metrics (these become the primary scatter plot)
-
-### 5B-P: Product Visualization Selection
-Use the chart selection table in [product-comparison-template.md](references/product-comparison-template.md). Key mappings:
-- Products ranked by one spec → Horizontal bar (sorted)
-- Two competing specs → Scatter plot (this is the hero chart)
-- Derived value metric → Horizontal bar with quality-indicator coloring
-- TCO breakdown → Stacked horizontal bar
-- Use case fit → Heatmap-style grid or rated dots
-- Top contenders across dimensions → Radar chart
-- Boolean features → Checklist matrix table
-
-### 5C-P: Product Dashboard Structure
-Organize by the Section Selection Decision Tree from Phase 1B:
-1. **Overview** — stat cards, user profile insight, primary scatter plot, category distribution
-2. **Spec Comparison** — sortable table, bar charts for top 3-4 specs
-3. **[Primary Metric] Deep Dive** — derived metrics, value analysis charts
-4. **[Conditional sections]** — TCO, Features Matrix, Use Case Fit, Ecosystem, secondary metrics
-5. **Recommendations** — award cards, quick decision guide, multi-tier purchase options, avoid list
-6. **Sources** — methodology, pricing notes, disclaimers
-
-### 5D-P: Recommendation Engine
-Build curated picks with these award categories (select 5-7 that fit):
-- **Best Overall Value** — best bang for the buck
-- **Best Premium / No Compromises** — money is secondary to quality
-- **Best Budget** — cheapest viable option
-- **Best "Buy It For Life"** — longest-lasting, most durable (Durable lifecycle)
-- **Best for [Primary Use Case]** — tailored to user's main need
-- **Best for [Secondary Use Case]** — if Multi-Use-Case
-- **Hidden Gem** — underrated product experts love
-- **Most Comfortable / Ergonomic** — if comfort is a differentiator
-- **Best Using Your [Ecosystem]** — if user has existing ecosystem
-
-Also build **multi-tier purchase options** (2-4 strategies at different price points). Adapt the framing to the product type — not every product involves buying multiples:
-- **Option A** — Premium / No Compromises (~$X) — the best available, cost secondary
-- **Option B** — Best Value (~$X) — strong performance without overpaying
-- **Option C** — Budget-Smart (~$X) — meets core needs at the lowest reasonable cost
-- **Option D** — [Context-specific] (~$X) — adapt to the product (e.g., "Best for Your Ecosystem" if batteries matter, "Best Starter Setup" for hobby gear, "Best Combo" if buying two products makes sense)
+**Product/Purchase lens:** See [product-comparison-template.md](references/product-comparison-template.md#phase-5-additions-product-analysis) for product key findings, visualization selection, dashboard structure, and recommendation engine.
 
 ---
 
@@ -501,58 +394,11 @@ See [build-templates.md](references/build-templates.md) for data schemas, compon
     └── researchData.js        # All research data as ES module exports
 ```
 
-**Product/Purchase lens additions to Phase 6:**
-
-When the Product/Purchase lens is active, use the product-specific component patterns from [product-comparison-template.md](references/product-comparison-template.md).
-
-### Product Comparison File Structure (within the hub):
-
-```
-<hubPath>/src/projects/<slug>/
-├── App.jsx                    # Sidebar nav + section routing + product detail routing
-├── components/
-│   ├── CustomTooltip.jsx
-│   ├── InsightCallout.jsx
-│   ├── ComparisonTable.jsx    # Sortable/filterable table with expandable rows
-│   ├── ProductDetail.jsx      # Full product deep-dive page
-│   ├── RecommendationCards.jsx
-│   ├── [MetricDeepDive].jsx   # e.g., PowerPerformance, AirflowAnalysis
-│   ├── [ConditionalSection].jsx # TCO, FeaturesMatrix, UseCaseMatrix, Ecosystem
-│   └── Sources.jsx
-└── data/
-    ├── products.js            # Product array + constants
-    └── productDetails.js      # Deep per-product info
-```
-
-### Product Comparison Build Order:
-
-1. **Data files first** — `products.js` with the standardized product schema, `productDetails.js` with deep per-product info including `getAggregateRating()` helper
-2. **Reusable components** — CustomTooltip, InsightCallout (with variant support: info/warning/recommendation/critical/highlight)
-3. **ComparisonTable** — sortable columns, category/tier/brand filters, expandable rows, link to ProductDetail
-4. **ProductDetail** — full page with specs table, purchase links, aggregate ratings, retailer rating breakdown, pros/cons from reviews, use case fit bars, highlights, back button
-5. **Overview section** — stat cards, primary scatter plot, key insights, category distribution charts
-6. **Metric deep-dive sections** — bar charts for key specs, derived metric charts, scatter plots
-7. **Conditional sections** — build only those flagged in Phase 1B (TCO, Features Matrix, Use Case Fit, Ecosystem)
-8. **Recommendations** — award cards, quick decision guide, multi-tier purchase options, avoid list (if Durable)
-9. **Sources** — methodology notes, pricing disclaimers, safety warnings (if applicable)
-10. **App.jsx** — project-level sidebar nav with icons, section routing, ProductDetail routing, mobile responsive
+**Product/Purchase lens:** See [product-comparison-template.md](references/product-comparison-template.md#phase-6-additions-product-build) for product file structure, component patterns, and build order.
 
 ### Important: Store the User's Original Query
 
 When updating `config.json` and `projects/index.js`, always store the user's original natural-language query in the `query` field. This is displayed in the hub's project cards and sidebar so the user remembers what each research was about.
-
-### Telemetry: Phase 6 Capture
-
-After the build completes, count and record:
-
-1. **`sectionsBuilt`** — number of section components created (count files in components/ that are sections, not utilities)
-2. **`chartsBuilt`** — number of individual chart/visualization elements across all sections
-3. **`filesGenerated`** — total files written to the project directory (App.jsx + components + data files)
-4. **`sourcesCount`** — count unique sources referenced in the data files
-5. **`productsCompared`** — length of the products array (Product lens only, null otherwise)
-6. **`dataPointsCollected`** — approximate count of individual data values gathered during Phase 4
-7. **Increment `searchesPerformed`** — add any searches done during Phase 4 research
-8. **End `phaseTiming.build`** timer
 
 ---
 
@@ -567,71 +413,9 @@ After the build completes, count and record:
    - Summarize sections, note gaps, offer to deploy
 5. **Verify hub integration:** Confirm the new project appears in the hub sidebar and is navigable from the hub home page
 
-### Telemetry: Phase 7 Finalization
+6. **Finalize telemetry:** Capture content analysis, hours-saved estimation, consumption time, and persist to config.json and projects/index.js. See [hub-architecture.md](references/hub-architecture.md#telemetry-schema) for all schemas, formulas, and capture timing.
 
-After QA and delivery, finalize the telemetry object and persist it.
-
-See [hub-architecture.md](references/hub-architecture.md) for the complete schemas and estimation formulas.
-
-#### Step 1: Core Telemetry
-1. **Record `runCompletedAt`** — current ISO 8601 timestamp
-2. **Calculate `durationMinutes`** — difference between `runCompletedAt` and `runStartedAt`
-3. **End `phaseTiming.present`** timer
-4. **Record `tokenUsage`** — if available from the runtime environment, otherwise `null`
-
-#### Step 2: Content Analysis (Readability & Cognitive Depth)
-Analyze ALL text content in the built dashboard (insight callouts, section descriptions, data labels, tooltip text, recommendation text):
-1. **Count `totalWords` and `totalSentences`** across all components
-2. **Calculate `fleschKincaidGrade`** using: `0.39 × (words/sentences) + 11.8 × (syllables/words) − 15.59`
-3. **Assign `fleschKincaidLabel`** — map grade to label (e.g., 8.0 = "8th Grade", 13.0 = "College")
-4. **Assess `bloomsLevel`** — evaluate the dominant cognitive level of the content:
-   - Data display = Remember/Understand (1-2)
-   - Comparative analysis = Analyze (4)
-   - Recommendations/verdicts = Evaluate (5)
-5. **Set `bloomsRange`** — the full range of levels present (e.g., "Understand → Evaluate")
-6. **Write `readabilityNote`** — brief characterization (e.g., "College-prep level with data-driven analytical content")
-
-#### Step 3: Hours Saved Estimation
-Calculate the equivalent manual effort using build metrics:
-1. **`researchHours`** = `(sourcesCount × 0.75) + (dataPointsCollected × 0.02) + (searchesPerformed × 0.25)`
-2. **`productionHours`** — calculate for ALL six output formats:
-   - `interactive-dashboard` = `(sectionsBuilt × 6) + (chartsBuilt × 3) + (filesGenerated × 0.5)`
-   - `white-paper` = `(sectionsBuilt × 4) + (sourcesCount × 0.5) + (dataPointsCollected × 0.01)`
-   - `blog-post` = `(sectionsBuilt × 2.5) + (chartsBuilt × 1)`
-   - `technical-doc` = `(sectionsBuilt × 3) + (sourcesCount × 0.3)`
-   - `presentation` = `(sectionsBuilt × 1.5) + (chartsBuilt × 0.5)`
-   - `github-repo` = `(sectionsBuilt × 3) + (chartsBuilt × 2) + (filesGenerated × 0.5)`
-3. **`totalHoursSaved`** = `researchHours + productionHours['interactive-dashboard']`
-4. **`equivalentLabel`** — human-readable (e.g., "~2 weeks full-time")
-
-#### Step 4: Consumption Time
-Estimate how long a human reader would need to fully consume the dashboard:
-1. **`readingMinutes`** = `totalWords / (fleschKincaidGrade > 12 ? 120 : 150)`
-2. **`chartExplorationMinutes`** = `chartsBuilt × 0.75`
-3. **`interactiveOverheadMinutes`** = `(readingMinutes + chartExplorationMinutes) × 0.2`
-4. **`estimatedMinutes`** = sum of above three
-5. **`estimatedLabel`** — human-readable (e.g., "~45 min deep read")
-
-#### Step 5: Persist
-Write the complete telemetry object (including `contentAnalysis`, `hoursSaved`, `consumptionTime`) to both:
-- `config.json` → under the project's `telemetry` field
-- `projects/index.js` → in the project's registry entry as a `telemetry` property
-
-Verify the hub home page displays all telemetry stats on the project card.
-
-**Product/Purchase lens additions to Phase 7:**
-
-5. **Product QA (additional checks):**
-   - Every product in the comparison table expands correctly with detail
-   - ProductDetail pages render for all products with purchase links, ratings, and specs
-   - All purchase links are valid URLs (not placeholder text)
-   - Aggregate ratings calculate correctly from source ratings
-   - Recommendation cards reference real products in the data
-   - Quick decision guide answers map to actual products with correct prices
-   - Multi-tier purchase options have accurate total costs
-   - Filters (tier, brand, category) work correctly and show accurate counts
-   - Scatter plot axes are labeled and tooltips show product names
-   - Brand colors are consistent across all charts
+**Product/Purchase lens:** See [product-comparison-template.md](references/product-comparison-template.md#phase-7-additions-product-qa) for product-specific QA checks.
 
 ---
 

@@ -355,6 +355,161 @@ export const TIER_COLORS = {
 
 ---
 
+## Phase-Specific Product Additions
+
+These sections describe how the Product/Purchase lens modifies each phase of the standard pipeline. They are referenced from SKILL.md via pointers.
+
+### Phase 2 Additions: Product Survey
+
+When the Product/Purchase lens is active, replace or augment the standard searches with:
+
+1. **Conduct 3-5 product-focused searches:**
+   - "best [product type] [current year]"
+   - "[product type] comparison review [current year]"
+   - "[product type] buyer's guide"
+   - "[product type] reddit recommendations"
+   - "[brand] [product type] specs"
+
+2. **Identify from results:**
+   - Major brands and their market positioning
+   - Key differentiating specs for this product type
+   - Price tiers and value breakpoints
+   - Expert review sources and independent testing labs
+   - Common complaints and praise patterns
+   - Ecosystem dependencies (batteries, platforms, accessories)
+
+3. **Determine product segmentation:**
+   - **Market tiers** — entry/mid/pro, economy/mid/luxury, budget/mainstream/premium
+   - **Power types** — gas/battery/corded, manual/electric, etc.
+   - **Use case categories** — if products serve different scenarios
+
+### Phase 4 Additions: Product Data Gathering
+
+When the Product/Purchase lens is active, the research phase focuses on per-product data gathering:
+
+1. **For each product on the shortlist**, gather the complete data object per the Standardized Product Data Schema above:
+   - All numeric specs (8-15 per product)
+   - Pre-calculate derived metrics
+   - Boolean features (if Features Matrix flagged)
+   - Use case ratings 1-5 (if Multi-Use-Case flagged)
+   - Qualitative data: bestFor, prosText, consText, verdict, highlights
+   - Sources list per product
+
+2. **Build the productDetails data** (separate file) for each product:
+   - Full manufacturer spec sheet (key-value pairs)
+   - Purchase links with retailer, URL, price, stock status (2-3 retailers per product)
+   - Ratings with source, stars, review count, URL (2-3 sources per product)
+   - Pros and cons extracted from actual user reviews (not just spec-derived)
+
+3. **Gather ecosystem data** (if Ecosystem Dependency flagged):
+   - Tool count per ecosystem, voltage, battery range, average battery price, retailer availability
+
+4. **Gather TCO components** (if Durable/Semi-Durable lifecycle):
+   - Annual fuel/energy cost, annual maintenance cost, consumable costs, expected lifespan
+   - Assumptions clearly documented
+
+5. **Track all sources** — manufacturer sites, retailer listings, review sites, community forums, expert reviews
+
+### Phase 5 Additions: Product Analysis
+
+When the Product/Purchase lens is active, replace the standard narrative flow with product-specific analysis:
+
+**5A-P: Product Key Findings**
+- **Best value discovery** — which product gives the most for the money?
+- **The "value paradox"** — is the cheapest to buy also the cheapest to own? (often not)
+- **Hidden gems** — products that experts love but casual buyers overlook
+- **Anti-recommendations** — products that look good on paper but have hidden downsides (Durable lifecycle only)
+- **Tradeoff identification** — the two most important competing metrics (these become the primary scatter plot)
+
+**5B-P: Product Visualization Selection**
+Use the Chart Selection for Product Comparisons table below. Key mappings:
+- Products ranked by one spec → Horizontal bar (sorted)
+- Two competing specs → Scatter plot (this is the hero chart)
+- Derived value metric → Horizontal bar with quality-indicator coloring
+- TCO breakdown → Stacked horizontal bar
+- Use case fit → Heatmap-style grid or rated dots
+- Top contenders across dimensions → Radar chart
+- Boolean features → Checklist matrix table
+
+**5C-P: Product Dashboard Structure**
+Organize by the Section Selection Decision Tree:
+1. **Overview** — stat cards, user profile insight, primary scatter plot, category distribution
+2. **Spec Comparison** — sortable table, bar charts for top 3-4 specs
+3. **[Primary Metric] Deep Dive** — derived metrics, value analysis charts
+4. **[Conditional sections]** — TCO, Features Matrix, Use Case Fit, Ecosystem, secondary metrics
+5. **Recommendations** — award cards, quick decision guide, multi-tier purchase options, avoid list
+6. **Sources** — methodology, pricing notes, disclaimers
+
+**5D-P: Recommendation Engine**
+Build curated picks with these award categories (select 5-7 that fit):
+- **Best Overall Value** — best bang for the buck
+- **Best Premium / No Compromises** — money is secondary to quality
+- **Best Budget** — cheapest viable option
+- **Best "Buy It For Life"** — longest-lasting, most durable (Durable lifecycle)
+- **Best for [Primary Use Case]** — tailored to user's main need
+- **Best for [Secondary Use Case]** — if Multi-Use-Case
+- **Hidden Gem** — underrated product experts love
+- **Most Comfortable / Ergonomic** — if comfort is a differentiator
+- **Best Using Your [Ecosystem]** — if user has existing ecosystem
+
+Also build **multi-tier purchase options** (2-4 strategies at different price points). Adapt the framing to the product type — not every product involves buying multiples:
+- **Option A** — Premium / No Compromises (~$X) — the best available, cost secondary
+- **Option B** — Best Value (~$X) — strong performance without overpaying
+- **Option C** — Budget-Smart (~$X) — meets core needs at the lowest reasonable cost
+- **Option D** — [Context-specific] (~$X) — adapt to the product (e.g., "Best for Your Ecosystem" if batteries matter, "Best Starter Setup" for hobby gear, "Best Combo" if buying two products makes sense)
+
+### Phase 6 Additions: Product Build
+
+When the Product/Purchase lens is active, use the product-specific component patterns from the Universal Component Patterns section above.
+
+**Product Comparison File Structure (within the hub):**
+
+```
+<hubPath>/src/projects/<slug>/
+├── App.jsx                    # Sidebar nav + section routing + product detail routing
+├── components/
+│   ├── CustomTooltip.jsx
+│   ├── InsightCallout.jsx
+│   ├── ComparisonTable.jsx    # Sortable/filterable table with expandable rows
+│   ├── ProductDetail.jsx      # Full product deep-dive page
+│   ├── RecommendationCards.jsx
+│   ├── [MetricDeepDive].jsx   # e.g., PowerPerformance, AirflowAnalysis
+│   ├── [ConditionalSection].jsx # TCO, FeaturesMatrix, UseCaseMatrix, Ecosystem
+│   └── Sources.jsx
+└── data/
+    ├── products.js            # Product array + constants
+    └── productDetails.js      # Deep per-product info
+```
+
+**Product Comparison Build Order:**
+
+1. **Data files first** — `products.js` with the standardized product schema, `productDetails.js` with deep per-product info including `getAggregateRating()` helper
+2. **Reusable components** — CustomTooltip, InsightCallout (with variant support: info/warning/recommendation/critical/highlight)
+3. **ComparisonTable** — sortable columns, category/tier/brand filters, expandable rows, link to ProductDetail
+4. **ProductDetail** — full page with specs table, purchase links, aggregate ratings, retailer rating breakdown, pros/cons from reviews, use case fit bars, highlights, back button
+5. **Overview section** — stat cards, primary scatter plot, key insights, category distribution charts
+6. **Metric deep-dive sections** — bar charts for key specs, derived metric charts, scatter plots
+7. **Conditional sections** — build only those flagged in Phase 1B (TCO, Features Matrix, Use Case Fit, Ecosystem)
+8. **Recommendations** — award cards, quick decision guide, multi-tier purchase options, avoid list (if Durable)
+9. **Sources** — methodology notes, pricing disclaimers, safety warnings (if applicable)
+10. **App.jsx** — project-level sidebar nav with icons, section routing, ProductDetail routing, mobile responsive
+
+### Phase 7 Additions: Product QA
+
+**Product QA (additional checks):**
+- Every product in the comparison table expands correctly with detail
+- ProductDetail pages render for all products with purchase links, ratings, and specs
+- All purchase links are valid URLs (not placeholder text)
+- Aggregate ratings calculate correctly from source ratings
+- Recommendation cards reference real products in the data
+- Quick decision guide answers map to actual products with correct prices
+- Multi-tier purchase options have accurate total costs
+- Filters (tier, brand, category) work correctly and show accurate counts
+- Scatter plot axes are labeled and tooltips show product names
+- Brand colors are consistent across all charts
+
+---
+
 ## Research Phase Guidance (Product-Specific)
 
 ### What to Search For

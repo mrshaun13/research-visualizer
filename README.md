@@ -203,7 +203,7 @@ research-visualizer/
 ```
 
 Follows the [agentskills.io specification](https://agentskills.io/specification):
-- SKILL.md < 500 lines with progressive disclosure
+- SKILL.md under 500 lines with progressive disclosure via reference files
 - Reference files loaded on-demand, not at activation
 - Frontmatter includes `name`, `description`, `compatibility`, and `metadata`
 
