@@ -584,21 +584,30 @@ The Research Hub supports an optional community **contribution** model. Users ca
 ### Architecture
 
 ```
-┌─────────────────────┐     git push main        ┌──────────────────────┐
+┌─────────────────────┐     git push              ┌──────────────────────┐
 │  User's Own Hub     │ ──────────────────────►   │  User's Own Repo     │
-│  ~/research-hub/    │                           │  (their GitHub)      │
-│                     │     git push              ├──────────────────────┤
-│                     │  library main:agent-      │                      │
-│                     │  contributions            │  Public Library      │
+│  ~/research-hub/    │     (personal remote)     │  (their GitHub)      │
+│                     │                           └──────────────────────┘
+│                     │     GitHub API
+│                     │  (blobs → tree → commit   ┌──────────────────────┐
+│                     │   → update ref)           │  Public Library      │
 │                     │ ──────────────────────►   │  mrshaun13/          │
-│                     │                           │  research-hub        │
+│                     │     PAT auth              │  research-hub        │
 └─────────────────────┘                           │  (agent-contributions│
                                                   │   branch)            │
                                                   └──────────┬───────────┘
-                                                             │
-                                                  GitHub Action validates
-                                                  Maintainer reviews & merges
+                                                             │ push triggers
+                                                  ┌──────────▼───────────┐
+                                                  │  GitHub Action       │
+                                                  │  • Detect projects   │
+                                                  │  • Validate structure│
+                                                  │  • Build test        │
+                                                  │  • Auto-merge → main│
+                                                  │  (or Issue on fail)  │
+                                                  └──────────────────────┘
 ```
+
+**Key design decision:** The personal hub and public library are **completely separate git repositories** with independent histories. Contributions cannot use `git push` across repos. Instead, the agent uses the **GitHub REST API** (Git Data endpoints) to create blobs, trees, and commits directly on the library's `agent-contributions` branch. This works with any PAT that has `Contents: write` permission — no local clone of the library is needed.
 
 ### Config Schema (library fields)
 
@@ -624,7 +633,7 @@ Added to the machine-local `config.json`:
 | Field | Type | Description |
 |---|---|---|
 | `library.enabled` | boolean | Whether the user has opted in to sharing. Once set, Phase 0C never asks again. |
-| `library.remote` | string | URL of the public library repo |
+| `library.remote` | string | URL of the public library repo (used to derive the API base URL) |
 | `library.branch` | string | Branch to push contributions to (always `agent-contributions`) |
 | `library.token` | string | Fine-grained PAT for pushing to the library. Provided by the maintainer during one-time setup. Stored locally in config.json (never committed to any repo). |
 | `library.gitUsername` | string | From `git config user.name` — appended to project slugs to avoid collisions (e.g., `chainsaw-comparison-jdoe`) |
@@ -641,58 +650,132 @@ This ensures multiple contributors can research the same topic without overwriti
 
 When the user opts in during Phase 0C and provides a PAT:
 
-1. Add a named remote called `library` with the token baked in:
-   ```bash
-   git remote add library https://x-access-token:<PAT>@github.com/mrshaun13/research-hub.git
+1. Store the PAT and username in `config.json` under the `library` field (see schema above)
+2. **No git remote is needed.** Contributions use the GitHub API directly.
+3. The PAT is used as an `Authorization: token <PAT>` header on all API calls.
+
+### Agent-Side Contribution Flow (Phase 7 Step 8)
+
+When `library.enabled` is true, the agent shares the project via the GitHub REST API:
+
+1. **Determine library slug:** `<local-slug>-<gitUsername>` (e.g., `pixel-upgrade-analysis-mrshaun13`)
+
+2. **Get branch HEAD:**
+   ```
+   GET /repos/mrshaun13/research-hub/git/ref/heads/agent-contributions
+   ```
+   Extract the commit SHA, then get the tree SHA from that commit.
+
+3. **Read the library's current `index.js`:**
+   ```
+   GET /repos/mrshaun13/research-hub/contents/src/projects/index.js?ref=agent-contributions
+   ```
+   Decode the base64 content. Add the new project's registry entry (with full telemetry) to the `projectRegistry` array and add the lazy component import to `projectComponents`.
+
+4. **Create blobs** for each project file and the updated `index.js`:
+   ```
+   POST /repos/mrshaun13/research-hub/git/blobs
+   { "content": "<file content>", "encoding": "utf-8" }
+   ```
+   Files to push: `App.jsx`, all `components/*.jsx`, all `data/*.js`, and the updated `index.js`.
+
+5. **Create tree** with all blob entries:
+   ```
+   POST /repos/mrshaun13/research-hub/git/trees
+   {
+     "base_tree": "<tree SHA from step 2>",
+     "tree": [
+       { "path": "src/projects/<library-slug>/App.jsx", "mode": "100644", "type": "blob", "sha": "<blob SHA>" },
+       { "path": "src/projects/<library-slug>/components/Overview.jsx", ... },
+       { "path": "src/projects/index.js", "mode": "100644", "type": "blob", "sha": "<updated index blob>" }
+     ]
+   }
    ```
 
-2. On each build completion (Phase 7 step 8), push to the contributions branch:
-   ```bash
-   git push library main:agent-contributions
+6. **Create commit:**
    ```
+   POST /repos/mrshaun13/research-hub/git/commits
+   {
+     "message": "Add <project title> (contributor: <gitUsername>)",
+     "tree": "<new tree SHA>",
+     "parents": ["<branch HEAD SHA from step 2>"]
+   }
+   ```
+
+7. **Update ref** to point `agent-contributions` to the new commit:
+   ```
+   PATCH /repos/mrshaun13/research-hub/git/refs/heads/agent-contributions
+   { "sha": "<new commit SHA>" }
+   ```
+
+8. **Inform the user:** "Your research has been shared with the public library. A validation workflow will run automatically — if it passes, your research will be merged to main without any manual steps."
+
+All API calls use `Authorization: token <library.token>` header. If any call returns 401/403, inform the user the PAT may be invalid or expired.
+
+### Automated Validation & Merge (Server-Side)
+
+When a push lands on `agent-contributions`, a GitHub Action (`.github/workflows/process-contributions.yml`) runs automatically:
+
+1. **Detect new projects** — compares `agent-contributions` against `main` to find new `App.jsx` files
+2. **Validate project structure** — runs `.github/scripts/validate-research-project.mjs` which checks:
+   - File structure: `App.jsx`, `components/` (with Overview.jsx + Sources.jsx minimum), `data/` with substantial files
+   - Registry entry: all required fields present, valid lens, valid slug format, ISO timestamps
+   - Telemetry: all required fields, sane ranges, phase timing, content analysis, hours saved, consumption time
+   - Content quality: React imports, JSX patterns, chart/visualization usage, data exports
+   - Product lens extras: `productsCompared >= 3` for product lens projects
+3. **Build test** — runs `npm ci && vite build` to verify no compilation errors
+4. **If ALL pass** → auto-merges `agent-contributions` into `main` via the GitHub API merge endpoint (authenticated with `ADMIN_PAT` repo secret)
+5. **If ANY fail** → creates a GitHub Issue with the full validation report, tagged `validation-failed`
+
+### Security Model
+
+| Layer | Protection |
+|---|---|
+| **Contributor PAT** | Fine-grained, scoped to `mrshaun13/research-hub` only, `Contents: write` permission. Can only push to `agent-contributions` (branch protection blocks `main`). |
+| **Branch protection on `main`** | Repository ruleset requires PRs for changes. Only the repo admin (SSH) and the `ADMIN_PAT` (stored as a GitHub secret) can write to `main`. |
+| **Validation script** | Lives on `main` — contributors cannot modify it. Runs server-side on GitHub's infrastructure. Checks structure, telemetry, content quality, and build integrity. |
+| **Auto-merge** | Uses `ADMIN_PAT` (repo secret, invisible to contributors) via the GitHub API merge endpoint. Only executes after all validation checks pass. |
+| **Failure notification** | Failed contributions create a GitHub Issue with details — visible to both the repo owner and the contributor. |
 
 ### Maintainer-Side Setup
 
 The library maintainer (repo owner) needs to configure:
 
 1. **Branch protection on `main`:**
-   - Require pull request reviews before merging
-   - Restrict direct pushes to maintainer only
-   - This prevents contributors from accidentally pushing to main
+   - Repository ruleset requiring pull requests for changes
+   - Repository admin in the bypass list
+   - `ADMIN_PAT` stored as a repo secret (Settings → Secrets → Actions) — this PAT must have `Contents: write` and belong to a repo admin
 
 2. **GitHub Action** (`.github/workflows/process-contributions.yml`):
-   - Triggers on pushes to `agent-contributions`
-   - Validates project structure (App.jsx, components/, data/)
-   - Runs `vite build` to verify no build errors
-   - Creates a summary of new projects detected
+   - Already configured — triggers on push to `agent-contributions`
+   - Validates, builds, and auto-merges on success
 
-3. **Scoped PAT for contributors:**
+3. **Validation script** (`.github/scripts/validate-research-project.mjs`):
+   - Already configured — comprehensive checks for structure, metadata, telemetry, and content quality
+
+4. **Scoped PAT for contributors:**
    - Create a fine-grained PAT with:
      - Repository access: `mrshaun13/research-hub` only
-     - Permissions: Contents (write) — scoped to `agent-contributions` branch via branch protection
+     - Permissions: Contents (write)
+   - Branch protection ensures this PAT can only write to `agent-contributions`
    - Distribute to users who opt in
-
-4. **Review workflow:**
-   - Contributions land on `agent-contributions` branch
-   - Maintainer reviews via PR or direct inspection
-   - Merge to `main` when satisfied
 
 ### Zero-Effort Sharing
 
 Users who don't have their own git repo can still share:
-- The agent adds the `library` remote to their local hub (even without a personal remote)
-- After a build, the agent pushes just to the library
+- The agent uses the GitHub API directly — no local clone of the library is needed
+- After a build, the agent pushes project files via the API
 - The user doesn't need to understand git — the agent handles everything
 
 ### Ad-Hoc Sharing
 
 Users can share past research at any time by asking the skill:
-> "Share my chainsaw comparison with mrshaun13's public library"
+> "Share my chainsaw comparison with the public library"
 
 The skill will:
-1. Check if the `library` remote exists, add it if not
-2. Push the current state to `agent-contributions`
-3. Confirm to the user
+1. Read the project files from the user's local hub
+2. Push them to `agent-contributions` via the GitHub API (same flow as Phase 7 step 8)
+3. Confirm to the user: "Shared! The validation workflow will run automatically."
 
 ## Port Management
 
@@ -729,7 +812,10 @@ This avoids port conflicts from multiple dev servers. Only ONE server ever runs.
 | Git: pull has merge conflicts | Conflicts likely in `src/projects/index.js` — resolve by keeping both project entries, then re-commit |
 | Git: config.json has wrong hubPath after clone | config.json is machine-local (not in repo) — just update the `hubPath` field to match the local clone path |
 | Git: user wants to add remote to existing hub later | `cd <hubPath> && git remote add origin <url> && git push -u origin main` — then update config.json `gitRepo` field |
-| Library: user wants to opt in after initially declining | Update config.json `library.enabled` to true, add the library remote, and provide PAT if available |
-| Library: push to agent-contributions fails with 403 | The library PAT is missing or expired — ask user to contact the library maintainer for a new scoped PAT |
-| Library: user asks to "share with mrshaun13's library" | Run the library share flow from Phase 7 step 8, even outside of a normal research run |
+| Library: user wants to opt in after initially declining | Update config.json `library.enabled` to true, store PAT and gitUsername. No git remote needed. |
+| Library: GitHub API call fails with 401/403 | The library PAT is missing, expired, or lacks `Contents: write` permission — ask user to contact the library maintainer for a new scoped PAT |
+| Library: GitHub API call fails with 409 (conflict) | Another contribution may be in progress. Wait a moment and retry. If persistent, the `agent-contributions` branch may have diverged — get the latest HEAD and retry. |
+| Library: user asks to "share with the public library" | Run the library share flow from Phase 7 step 8, even outside of a normal research run |
 | Library: slug collision in the library | Slugs are suffixed with `gitUsername` (e.g., `chainsaw-comparison-jdoe`) — collisions should not occur |
+| Library: validation workflow fails after push | A GitHub Issue is created automatically with failure details. Fix the issues in the local project and re-push. |
+| Library: project already exists in library index.js | When reading the current index.js (step 3 of contribution flow), check if the slug already exists. If so, update the existing entry rather than adding a duplicate. |

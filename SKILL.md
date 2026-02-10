@@ -145,7 +145,20 @@ See [hub-architecture.md](references/hub-architecture.md#public-library-browse) 
 **Skip entirely if `config.json` already has a `library` field.** This is about *contributing* research, not browsing.
 
 1. **Ask:** "Would you also like to **contribute** your research back to the public library? It's zero effort — the agent handles everything after a one-time setup."
-2. **If yes:** Capture `git config user.name` (for slug collision avoidance), ask for the contributor PAT (one-time token from the library maintainer), configure the `library` remote and `config.json`. See [hub-architecture.md](references/hub-architecture.md#community-library) for detailed setup steps and config schema.
+2. **If yes:**
+   - Capture `git config user.name` (for slug collision avoidance)
+   - Ask for the contributor PAT (one-time token from the library maintainer)
+   - Store in `config.json` — no git remote is needed. Contributions use the GitHub API directly:
+     ```json
+     "library": {
+       "enabled": true,
+       "remote": "https://github.com/mrshaun13/research-hub.git",
+       "branch": "agent-contributions",
+       "token": "<contributor PAT>",
+       "gitUsername": "<from git config>"
+     }
+     ```
+   - See [hub-architecture.md](references/hub-architecture.md#community-library) for the full contribution flow.
 3. **If no:** Set `library.enabled` to false in config. User can opt in later.
 4. **Continue to Phase 1** (or stop here if no topic was provided).
 
@@ -480,14 +493,27 @@ When updating `config.json` and `projects/index.js`, always store the user's ori
    - Also update the local `config.json` with the `gitRepo` URL if not already set.
 
 8. **Library share (community):** If `config.json` has `library.enabled: true`:
-   - Ensure the `library` remote exists: `git remote get-url library` — if not, add it from config
-   - Push to the shared contributions branch (zero-touch, no confirmation needed):
-     ```bash
-     git push library main:agent-contributions
-     ```
-   - Inform the user: "Your research has been shared with the public library."
-   - If push fails (auth error): note that a library PAT may be needed and suggest the user contact the library maintainer.
-   - **Slug collision avoidance:** When library sharing is enabled, project slugs are suffixed with the contributor's `gitUsername` from config (e.g., `chainsaw-comparison-jdoe`). This ensures no naming conflicts in the library.
+
+   Contributions use the **GitHub API** directly — no git remotes or local clones of the library are needed. The agent pushes project files to the `agent-contributions` branch, where a GitHub Action validates and auto-merges to `main`.
+
+   **Steps (zero-touch, no confirmation needed):**
+
+   a. **Read config:** Get `library.token`, `library.gitUsername`, and `library.branch` from config.json
+   b. **Determine library slug:** Suffix the local slug with the contributor's username: `<slug>-<gitUsername>` (e.g., `chainsaw-comparison-jdoe`)
+   c. **Get branch HEAD:** `GET /repos/mrshaun13/research-hub/git/ref/heads/agent-contributions` → get SHA, then get tree SHA from the commit
+   d. **Read the library's current `src/projects/index.js`:** `GET /repos/mrshaun13/research-hub/contents/src/projects/index.js?ref=agent-contributions` → decode content. Add the new project's registry entry (with full telemetry) and lazy component import.
+   e. **Create blobs:** For each project file (`App.jsx`, `components/*.jsx`, `data/*.js`) and the updated `index.js`, create blobs via `POST /repos/.../git/blobs`
+   f. **Create tree:** `POST /repos/.../git/trees` with `base_tree` from step (c) and all blob entries under `src/projects/<library-slug>/`
+   g. **Create commit:** `POST /repos/.../git/commits` with the new tree and parent SHA
+   h. **Update ref:** `PATCH /repos/.../git/refs/heads/agent-contributions` with the new commit SHA
+
+   All API calls use header `Authorization: token <library.token>`.
+
+   - Inform the user: "Your research has been shared with the public library. A validation workflow will run automatically — if it passes, your research will be merged to main without any manual steps."
+   - If any API call fails with 401/403: note that the library PAT may be invalid or expired and suggest the user contact the library maintainer for a new one.
+   - **Slug collision avoidance:** Library slugs are always suffixed with `gitUsername` from config (e.g., `chainsaw-comparison-jdoe`). This ensures no naming conflicts.
+
+   See [hub-architecture.md](references/hub-architecture.md#community-library) for the full architecture, validation workflow, and security model.
 
 **Product/Purchase lens:** See [product-comparison-template.md](references/product-comparison-template.md#phase-7-additions-product-qa) for product-specific QA checks.
 
