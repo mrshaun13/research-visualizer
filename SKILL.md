@@ -12,7 +12,7 @@ license: MIT
 compatibility: Requires internet access for web search and data fetching.
 metadata:
   author: mrshaun13
-  version: "4.0"
+  version: "5.0"
 ---
 
 # Deep Research → Interactive Dashboard Pipeline
@@ -45,41 +45,46 @@ Before any research begins, check whether the Research Hub is already installed.
 
 See [hub-architecture.md](references/hub-architecture.md) for the complete config schema, directory structure, and project registry format.
 
+### No-Topic Invocation
+
+If the user invokes the skill **without a research topic** (e.g., "start research hub", "open my research", "browse the library"):
+- Run Detection and setup as normal (Phase 0, 0B, 0C as needed)
+- Start the dev server if not running, open browser preview
+- **Do NOT proceed to Phase 1** — the user just wants to browse. Inform them: "Your Research Hub is running. You can browse your local research and the public library."
+
 ### Detection
 
 1. **Check for config file:** `~/.codeium/windsurf/skills/research-visualizer/config.json`
 2. **If config exists:**
    - Read `hubPath` from config
-   - Verify the hub directory exists at that path
-   - Check if a Vite dev server is already running on the configured port (default 5180): `lsof -i :<port>` or `ps aux | grep vite`
-   - If server is running: note it — you will tell the user to refresh their browser at the end
-   - If server is not running: you will start it at the end
-   - **Skip to Phase 1** — the hub is ready, proceed with research
+   - **Git sync:** If the hub has a `.git` remote, run `git pull` (stash first if uncommitted changes). Note if new projects were pulled.
+   - **Public library sync:** If `publicLibrary.path` exists in config, run `git -C <publicLibrary.path> pull` to fetch latest community research.
+   - Check if Vite dev server is running on configured port (default 5180)
+   - If no topic provided → start server if needed, open browser, stop here
+   - If topic provided → **Skip to Phase 1**
 3. **If config does NOT exist → First-Time Setup (Phase 0B)**
 
 ### Phase 0B: First-Time Setup
 
-This runs ONCE, the very first time the skill is invoked.
+This runs ONCE, the very first time the skill is invoked on a machine.
 
 1. **Inform the user immediately:**
-   > "I see this is your first time running Research Visualizer. I'll set up a **Research Hub** — a single web app that will host all your research dashboards in one place. You'll never need multiple dev servers again."
+   > "I see this is your first time running Research Visualizer on this machine. I'll set up a **Research Hub** — a single web app that will host all your research dashboards in one place. You'll never need multiple dev servers again."
 
-2. **Ask for hub location:**
-   > "Where would you like to install the Research Hub? Default: `~/research-hub/`"
-   - Accept the user's choice or use the default
-   - The path must be absolute
+2. **Ask about existing hub (git sync):**
+   > "Do you have an existing Research Hub git repo from another machine? If so, I can clone it and you'll have all your previous research instantly. If not, I'll create a fresh one."
+   >
+   > "It's highly recommended to back your hub to a git repo — it lets you sync research across machines and keeps everything versioned."
 
-3. **Scaffold the hub app** at the chosen location using the structure defined in [hub-architecture.md](references/hub-architecture.md):
-   - `package.json` — with React 18, Vite 5, Recharts, Tailwind CSS 3, Lucide React
-   - `vite.config.js` — configured with the chosen port (default 5180)
-   - `tailwind.config.js`, `postcss.config.js`, `index.html`
-   - `src/main.jsx`, `src/index.css`
-   - `src/App.jsx` — Hub shell with ChatGPT-style collapsible sidebar + project routing
-   - `src/components/HubHome.jsx` — Landing page with project cards grid
-   - `src/projects/index.js` — Empty project registry (will be populated as projects are added)
+   - **If the user provides a git repo URL → Phase 0B-CLONE**
+   - **If the user says no / skip → Phase 0B-SCAFFOLD**
 
-4. **Run `npm install`** in the hub directory
+#### Phase 0B-CLONE: Clone Existing Hub
 
+1. **Ask for install location:** Default: `~/research-hub/`
+2. **Clone the repo:** `git clone <repo-url> <chosen-path>`
+3. **Run `npm install`** in the cloned directory
+4. **Read the project registry** from `src/projects/index.js` to discover existing projects
 5. **Create config.json** at `~/.codeium/windsurf/skills/research-visualizer/config.json`:
    ```json
    {
@@ -87,13 +92,65 @@ This runs ONCE, the very first time the skill is invoked.
      "created": "<ISO timestamp>",
      "hubPath": "<chosen path>",
      "port": 5180,
+     "gitRepo": "<repo-url>",
+     "projects": [/* populated from existing registry */]
+   }
+   ```
+6. **Inform the user:** "Cloned your Research Hub with N existing projects. All your previous research is ready."
+7. **Continue to Phase 0B-LIBRARY.**
+
+#### Phase 0B-SCAFFOLD: Create Fresh Hub
+
+1. **Ask for hub location:** Default: `~/research-hub/`
+2. **Scaffold the hub app** at the chosen location using the structure defined in [hub-architecture.md](references/hub-architecture.md):
+   - `package.json` — with React 18, Vite 5, Recharts, Tailwind CSS 3, Lucide React
+   - `vite.config.js` — configured with the chosen port (default 5180)
+   - `tailwind.config.js`, `postcss.config.js`, `index.html`
+   - `src/main.jsx`, `src/index.css`
+   - `src/App.jsx` — Hub shell with ChatGPT-style collapsible sidebar + project routing
+   - `src/components/HubHome.jsx` — Landing page with project cards grid
+   - `src/projects/index.js` — Empty project registry (will be populated as projects are added)
+3. **Run `npm install`** in the hub directory
+4. **Initialize git repo:**
+   - `git init`, `git branch -m main`
+   - Create `.gitignore` (node_modules/, dist/, .DS_Store, *.local)
+   - Ask: "Would you like to connect this to a git repo for syncing across machines? You can provide a GitHub URL now or set one up later."
+   - If the user provides a URL: `git remote add origin <url>`, initial commit, `git push -u origin main`
+   - If skipped: just `git init` with initial commit, no remote
+5. **Create config.json** at `~/.codeium/windsurf/skills/research-visualizer/config.json`:
+   ```json
+   {
+     "version": "1.0",
+     "created": "<ISO timestamp>",
+     "hubPath": "<chosen path>",
+     "port": 5180,
+     "gitRepo": "<repo-url or null>",
      "projects": []
    }
    ```
+6. **Continue to Phase 0B-LIBRARY.**
 
-6. **Continue to Phase 1** with the user's research request.
+### Phase 0B-LIBRARY: Public Library Browse (One-Time Only)
 
-**Telemetry:** Initialize the telemetry object at the start of this phase. See [hub-architecture.md](references/hub-architecture.md#telemetry-schema) for the complete schema, capture timing, and formulas.
+**Skip if `config.json` already has a `publicLibrary` field.** No authentication needed — the library is a public repo.
+
+1. **Ask:** "Would you like to browse the **public Research Library**? It contains community-contributed research dashboards you can explore alongside your own. No account needed."
+2. **If yes:** Clone read-only: `git clone https://github.com/mrshaun13/research-hub.git <hubPath>/../research-library`. Add to config: `"publicLibrary": { "path": "<clone-path>" }`. The hub UI will display public library projects in a separate browsable area.
+3. **If no:** Set `"publicLibrary": { "path": null }` in config. User can add it later.
+4. **Continue to Phase 0C.**
+
+See [hub-architecture.md](references/hub-architecture.md#public-library-browse) for UI integration details.
+
+### Phase 0C: Community Library Contribution (One-Time Only)
+
+**Skip entirely if `config.json` already has a `library` field.** This is about *contributing* research, not browsing.
+
+1. **Ask:** "Would you also like to **contribute** your research back to the public library? It's zero effort — the agent handles everything after a one-time setup."
+2. **If yes:** Capture `git config user.name` (for slug collision avoidance), ask for the contributor PAT (one-time token from the library maintainer), configure the `library` remote and `config.json`. See [hub-architecture.md](references/hub-architecture.md#community-library) for detailed setup steps and config schema.
+3. **If no:** Set `library.enabled` to false in config. User can opt in later.
+4. **Continue to Phase 1** (or stop here if no topic was provided).
+
+**Telemetry:** Initialize the telemetry object at the start of Phase 0. See [hub-architecture.md](references/hub-architecture.md#telemetry-schema) for the complete schema, capture timing, and formulas.
 
 ### Key Principle
 
@@ -415,30 +472,28 @@ When updating `config.json` and `projects/index.js`, always store the user's ori
 
 6. **Finalize telemetry:** Capture content analysis, hours-saved estimation, consumption time, and persist to config.json and projects/index.js. See [hub-architecture.md](references/hub-architecture.md#telemetry-schema) for all schemas, formulas, and capture timing.
 
+7. **Git sync (personal):** If the hub directory is a git repo with a remote:
+   - Stage all new/changed files: `git add -A`
+   - Commit with a descriptive message: `git commit -m "Add <project-title> research project"`
+   - Push to remote: `git push`
+   - Inform the user: "Your new research has been committed and pushed to your Research Hub repo. It will be available on your other machines after a `git pull`."
+   - If push fails (e.g., no remote configured), note it and suggest the user set up a remote later.
+   - Also update the local `config.json` with the `gitRepo` URL if not already set.
+
+8. **Library share (community):** If `config.json` has `library.enabled: true`:
+   - Ensure the `library` remote exists: `git remote get-url library` — if not, add it from config
+   - Push to the shared contributions branch (zero-touch, no confirmation needed):
+     ```bash
+     git push library main:agent-contributions
+     ```
+   - Inform the user: "Your research has been shared with the public library."
+   - If push fails (auth error): note that a library PAT may be needed and suggest the user contact the library maintainer.
+   - **Slug collision avoidance:** When library sharing is enabled, project slugs are suffixed with the contributor's `gitUsername` from config (e.g., `chainsaw-comparison-jdoe`). This ensures no naming conflicts in the library.
+
 **Product/Purchase lens:** See [product-comparison-template.md](references/product-comparison-template.md#phase-7-additions-product-qa) for product-specific QA checks.
 
 ---
 
 ## Edge Cases & Troubleshooting
 
-| Situation | How to Handle |
-|---|---|
-| Topic is too broad (e.g., "research everything about health") | Ask user to narrow: "What aspect of health? Which population?" |
-| No academic data exists for a dimension | Note as data-limited, use T3/T4 sources, caveat clearly in dashboard |
-| Subgroup discovery finds >5 meaningful splits | Keep top 3-4 most distinct, merge rest into "other" |
-| Taxonomy discovery returns <10 items | Expand search to adjacent fields, accept smaller taxonomy |
-| User checkpoint gets major revisions | Re-run Phase 3 discovery for new dimensions, don't restart from scratch |
-| File writing fails (write_to_file doesn't persist) | Fall back to shell heredoc commands, verify with `ls -la` |
-| Build fails with import errors | Check all exports match imports, verify data file schemas |
-| Charts render but show wrong data | Spot-check: compare 2-3 data points in chart vs source data file |
-| Product lens: too many products to compare (>25) | Narrow to top 15-20 by eliminating discontinued, unavailable, or redundant models |
-| Product lens: can't find purchase links for a product | Use manufacturer URL + generic retailer search URL; note "check availability" |
-| Product lens: conflicting specs across sources | Prefer manufacturer specs > independent testing > retailer listings; note discrepancies |
-| Product lens: user's product category is ambiguous | Ask: "Are you looking for [interpretation A] or [interpretation B]?" before proceeding |
-| Product lens: no clear market tiers exist | Use price-based segmentation (Budget/Mid/Premium) or skip tier system entirely |
-| Product lens: product is too niche (<5 options exist) | Include all available options; supplement with adjacent products or previous-gen models |
-| Hub: config.json exists but hubPath directory is missing | Re-run first-time setup (Phase 0B), preserve existing project entries from config |
-| Hub: dev server already running on the port | Skip starting a new server; tell user to refresh browser |
-| Hub: project slug already exists in registry | Ask user: overwrite existing project or choose a new name? |
-| Hub: npm install fails in hub directory | Check node/npm versions, clear node_modules and retry, check for lockfile conflicts |
-| Hub: new project doesn't appear after refresh | Verify projects/index.js was updated correctly, check for import errors in browser console |
+See [hub-architecture.md](references/hub-architecture.md#edge-cases--troubleshooting) for the full troubleshooting table covering research, product lens, hub, git, and library edge cases.

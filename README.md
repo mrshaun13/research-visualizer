@@ -190,7 +190,7 @@ The skill prevents inconsistent output through:
 
 ```
 research-visualizer/
-├── SKILL.md                              # Core skill instructions (v4.0)
+├── SKILL.md                              # Core skill instructions (v5.0)
 ├── README.md                             # This file
 ├── config.json                           # Hub installation config (created on first run)
 └── references/
