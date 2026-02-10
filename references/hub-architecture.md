@@ -393,7 +393,7 @@ When the skill detects no `config.json`:
 
 1. **Inform user**: "I see this is your first time running Research Visualizer. I need to set up a Research Hub — a single web app that will host all your research dashboards."
 2. **Ask for location**: "Where would you like to install the Research Hub? Default: `~/research-hub/`"
-3. **Scaffold hub**: Create all hub files (package.json, vite config, App.jsx, HubHome, etc.)
+3. **Scaffold hub**: Create all hub files using the exact templates from [hub-scaffold-templates.md](hub-scaffold-templates.md) (package.json, vite config, App.jsx with two-section sidebar, HubHome with dual browsable areas, etc.)
 4. **Run npm install**
 5. **Create config.json** with hubPath and empty projects array
 6. **Continue with the user's research request** (Phases 1-7 as normal, building into the hub)
@@ -490,18 +490,28 @@ This fetches the latest community research. No push ever happens to this clone.
 
 ### Hub UI Integration
 
-When the public library is available, the hub displays **two browsable areas**:
+When the public library is available, the hub displays content in **two places**:
 
-1. **My Research** (sidebar, as today) — the user's own projects from their local hub
-2. **Public Library** (accessible from the Home/landing area on the far left) — community-contributed projects from the read-only clone
+**Sidebar (collapsible, two sections):**
+1. **Personal Research** — section header with sparkle icon, independent search bar, lists user's own projects
+2. **Shared Research** — section header with library icon, independent search bar, lists public library projects. Only visible when `publicLibrary.path` is configured and has projects. Separated by a subtle border.
 
-The hub reads the public library's `src/projects/index.js` to discover available projects and renders them as read-only cards. Public library projects open in the same viewer but are clearly badged as "Community" and cannot be edited.
+**Main content (HubHome landing page):**
+1. **My Research** — card grid of personal projects (or empty state prompt)
+2. **Public Library** — card grid of community projects with search, shown only when library is configured
+
+**Navigation:**
+- Clicking the **Research Hub logo/title** in the sidebar header returns to the home landing page
+- When viewing a project, a **back button bar** appears at the top of the main content area with `← Back | Project Title` and a "Community — read-only" badge for shared projects
+- Clicking any project in either sidebar section switches directly to that project
+
+The hub reads the public library's `src/projects/index.js` via the `@public-library` Vite alias to discover available projects and renders them as read-only cards. See [hub-scaffold-templates.md](hub-scaffold-templates.md) for the exact App.jsx and HubHome.jsx implementations.
 
 **Key differences from local projects:**
 - Public projects are read-only — no editing, no data changes
 - Public projects show the contributor's username (from the slug suffix)
-- Public projects have a "Community" badge on their cards
-- Search is split: sidebar search filters local projects, home/library area search filters public projects
+- Public projects have a "Community" badge on their cards and in the back bar
+- Search is split: sidebar has independent search per section, HubHome has a library search bar
 
 ### Directory Layout
 
@@ -511,6 +521,59 @@ The hub reads the public library's `src/projects/index.js` to discover available
 ```
 
 These are completely separate git repos. The hub app reads from both at runtime.
+
+### Public Library Vite Alias
+
+The personal hub imports the public library's project registry using a **Vite resolve alias**. This is configured during Phase 0B-LIBRARY.
+
+**vite.config.js** (after library setup):
+```js
+import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+import path from 'path';
+
+export default defineConfig({
+  plugins: [react()],
+  server: {
+    port: 5180,
+    host: true,
+  },
+  resolve: {
+    alias: {
+      '@public-library': path.resolve('<publicLibrary.path>', 'src'),
+    },
+  },
+});
+```
+
+**How the hub uses it:**
+
+In `App.jsx`, conditionally import the public library's registry:
+```js
+// Try to import public library projects — fails gracefully if not configured
+let publicProjectRegistry = [];
+let publicProjectComponents = {};
+try {
+  const publicLib = await import('@public-library/projects');
+  publicProjectRegistry = publicLib.projectRegistry || [];
+  publicProjectComponents = publicLib.projectComponents || {};
+} catch (e) {
+  // Public library not configured or not available — that's fine
+}
+```
+
+In practice, since static imports are simpler for Vite bundling, the scaffold should use a **static import with a try/catch wrapper** or a **dynamic import in a useEffect**. The key requirement: if the alias doesn't resolve (no library configured), the hub must still load without errors — it just shows the "My Research" section only.
+
+**When scaffolding App.jsx and HubHome.jsx during Phase 0B-SCAFFOLD:**
+- Always include the public library import logic and the two-area HubHome layout
+- When no public library is configured, the Public Library section simply doesn't render (empty array, hidden section)
+- When the library IS configured (Phase 0B-LIBRARY adds the alias), the import resolves and public projects appear automatically
+
+**When Phase 0B-LIBRARY runs:**
+1. Clone the public library repo
+2. Add the `@public-library` alias to `vite.config.js`
+3. Run `npm install` in the public library directory if needed
+4. The hub's existing App.jsx/HubHome.jsx will now automatically pick up the public library projects on next dev server restart
 
 ---
 

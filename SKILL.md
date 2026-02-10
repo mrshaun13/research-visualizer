@@ -12,7 +12,7 @@ license: MIT
 compatibility: Requires internet access for web search and data fetching.
 metadata:
   author: mrshaun13
-  version: "5.0"
+  version: "5.1"
 ---
 
 # Deep Research → Interactive Dashboard Pipeline
@@ -102,14 +102,7 @@ This runs ONCE, the very first time the skill is invoked on a machine.
 #### Phase 0B-SCAFFOLD: Create Fresh Hub
 
 1. **Ask for hub location:** Default: `~/research-hub/`
-2. **Scaffold the hub app** at the chosen location using the structure defined in [hub-architecture.md](references/hub-architecture.md):
-   - `package.json` — with React 18, Vite 5, Recharts, Tailwind CSS 3, Lucide React
-   - `vite.config.js` — configured with the chosen port (default 5180)
-   - `tailwind.config.js`, `postcss.config.js`, `index.html`
-   - `src/main.jsx`, `src/index.css`
-   - `src/App.jsx` — Hub shell with ChatGPT-style collapsible sidebar + project routing
-   - `src/components/HubHome.jsx` — Landing page with project cards grid
-   - `src/projects/index.js` — Empty project registry (will be populated as projects are added)
+2. **Scaffold the hub app** at the chosen location. **Copy every file verbatim from [hub-scaffold-templates.md](references/hub-scaffold-templates.md)** — `package.json`, `vite.config.js` (no `@public-library` alias yet — added in Phase 0B-LIBRARY), `tailwind.config.js`, `postcss.config.js`, `index.html`, `src/main.jsx`, `src/index.css`, `src/App.jsx`, `src/components/HubHome.jsx`, `src/projects/index.js`.
 3. **Run `npm install`** in the hub directory
 4. **Initialize git repo:**
    - `git init`, `git branch -m main`
@@ -135,9 +128,15 @@ This runs ONCE, the very first time the skill is invoked on a machine.
 **Skip if `config.json` already has a `publicLibrary` field.** No authentication needed — the library is a public repo.
 
 1. **Ask:** "Would you like to browse the **public Research Library**? It contains community-contributed research dashboards you can explore alongside your own. No account needed."
-2. **If yes:** Clone read-only: `git clone https://github.com/mrshaun13/research-hub.git <hubPath>/../research-library`. Add to config: `"publicLibrary": { "path": "<clone-path>" }`. The hub UI will display public library projects in a separate browsable area.
-3. **If no:** Set `"publicLibrary": { "path": null }` in config. User can add it later.
-4. **Continue to Phase 0C.**
+2. **If yes:** Clone read-only: `git clone https://github.com/mrshaun13/research-hub.git <hubPath>/../research-library`. Add to config: `"publicLibrary": { "path": "<clone-path>" }`.
+3. **Configure Vite alias:** Add a resolve alias in `vite.config.js` so the hub can import from the public library:
+   ```js
+   resolve: { alias: { '@public-library': '<publicLibrary.path>/src' } }
+   ```
+   This allows `App.jsx` and `HubHome.jsx` to import the public library's project registry via `@public-library/projects`. See [hub-architecture.md](references/hub-architecture.md#public-library-vite-alias) for the full alias configuration.
+4. **Run `npm install`** in the public library directory if `node_modules/` is missing (needed for any shared dependencies).
+5. **If no:** Set `"publicLibrary": { "path": null }` in config. User can add it later.
+6. **Continue to Phase 0C.**
 
 See [hub-architecture.md](references/hub-architecture.md#public-library-browse) for UI integration details.
 
