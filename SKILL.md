@@ -85,80 +85,34 @@ This runs ONCE, the very first time the skill is invoked on a machine.
 2. **Clone the repo:** `git clone <repo-url> <chosen-path>`
 3. **Run `npm install`** in the cloned directory
 4. **Read the project registry** from `src/projects/index.js` to discover existing projects
-5. **Create config.json** at `~/.codeium/windsurf/skills/research-visualizer/config.json`:
-   ```json
-   {
-     "version": "1.0",
-     "created": "<ISO timestamp>",
-     "hubPath": "<chosen path>",
-     "port": 5180,
-     "gitRepo": "<repo-url>",
-     "projects": [/* populated from existing registry */]
-   }
-   ```
-6. **Inform the user:** "Cloned your Research Hub with N existing projects. All your previous research is ready."
+5. **Create config.json** per the schema in [hub-architecture.md](references/hub-architecture.md#config-file) — populate `hubPath`, `gitRepo`, and `projects` from the cloned registry.
+6. **Inform the user:** "Cloned your Research Hub with N existing projects."
 7. **Continue to Phase 0B-LIBRARY.**
 
 #### Phase 0B-SCAFFOLD: Create Fresh Hub
 
 1. **Ask for hub location:** Default: `~/research-hub/`
-2. **Scaffold the hub app** at the chosen location. **Copy every file verbatim from [hub-scaffold-templates.md](references/hub-scaffold-templates.md)** — `package.json`, `vite.config.js` (no `@public-library` alias yet — added in Phase 0B-LIBRARY), `tailwind.config.js`, `postcss.config.js`, `index.html`, `src/main.jsx`, `src/index.css`, `src/App.jsx`, `src/components/HubHome.jsx`, `src/projects/index.js`.
-3. **Run `npm install`** in the hub directory
-4. **Initialize git repo:**
-   - `git init`, `git branch -m main`
-   - Create `.gitignore` (node_modules/, dist/, .DS_Store, *.local)
-   - Ask: "Would you like to connect this to a git repo for syncing across machines? You can provide a GitHub URL now or set one up later."
-   - If the user provides a URL: `git remote add origin <url>`, initial commit, `git push -u origin main`
-   - If skipped: just `git init` with initial commit, no remote
-5. **Create config.json** at `~/.codeium/windsurf/skills/research-visualizer/config.json`:
-   ```json
-   {
-     "version": "1.0",
-     "created": "<ISO timestamp>",
-     "hubPath": "<chosen path>",
-     "port": 5180,
-     "gitRepo": "<repo-url or null>",
-     "projects": []
-   }
-   ```
+2. **Scaffold the hub app** — copy every file verbatim from [hub-scaffold-templates.md](references/hub-scaffold-templates.md) (no `@public-library` alias yet — added in Phase 0B-LIBRARY).
+3. **Run `npm install`**
+4. **Initialize git repo:** `git init`, `git branch -m main`, `.gitignore` (node_modules/, dist/, .DS_Store, *.local). Ask about connecting a remote — if provided, push; if skipped, local only.
+5. **Create config.json** per the schema in [hub-architecture.md](references/hub-architecture.md#config-file) — set `hubPath`, `port: 5180`, `gitRepo` (or null), empty `projects` array.
 6. **Continue to Phase 0B-LIBRARY.**
 
 ### Phase 0B-LIBRARY: Public Library Browse (One-Time Only)
 
 **Skip if `config.json` already has a `publicLibrary` field.** No authentication needed — the library is a public repo.
 
-1. **Ask:** "Would you like to browse the **public Research Library**? It contains community-contributed research dashboards you can explore alongside your own. No account needed."
-2. **If yes:** Clone read-only: `git clone https://github.com/mrshaun13/research-hub.git <hubPath>/../research-library`. Add to config: `"publicLibrary": { "path": "<clone-path>" }`.
-3. **Configure Vite alias:** Add a resolve alias in `vite.config.js` so the hub can import from the public library:
-   ```js
-   resolve: { alias: { '@public-library': '<publicLibrary.path>/src' } }
-   ```
-   This allows `App.jsx` and `HubHome.jsx` to import the public library's project registry via `@public-library/projects`. See [hub-architecture.md](references/hub-architecture.md#public-library-vite-alias) for the full alias configuration.
-4. **Run `npm install`** in the public library directory if `node_modules/` is missing (needed for any shared dependencies).
-5. **If no:** Set `"publicLibrary": { "path": null }` in config. User can add it later.
-6. **Continue to Phase 0C.**
-
-See [hub-architecture.md](references/hub-architecture.md#public-library-browse) for UI integration details.
+1. **Ask:** "Would you like to browse the **public Research Library**? Community-contributed dashboards you can explore alongside your own. No account needed."
+2. **If yes:** Clone read-only: `git clone https://github.com/mrshaun13/research-hub.git <hubPath>/../research-library`. Add `publicLibrary.path` to config. Add `@public-library` Vite alias. Run `npm install` if needed. See [hub-architecture.md](references/hub-architecture.md#public-library-browse) for alias config and UI integration.
+3. **If no:** Set `"publicLibrary": { "path": null }` in config. User can add it later.
+4. **Continue to Phase 0C.**
 
 ### Phase 0C: Community Library Contribution (One-Time Only)
 
 **Skip entirely if `config.json` already has a `library` field.** This is about *contributing* research, not browsing.
 
-1. **Ask:** "Would you also like to **contribute** your research back to the public library? It's zero effort — the agent handles everything after a one-time setup."
-2. **If yes:**
-   - Capture `git config user.name` (for slug collision avoidance)
-   - Ask for the contributor PAT (one-time token from the library maintainer)
-   - Store in `config.json` — no git remote is needed. Contributions use the GitHub API directly:
-     ```json
-     "library": {
-       "enabled": true,
-       "remote": "https://github.com/mrshaun13/research-hub.git",
-       "branch": "agent-contributions",
-       "token": "<contributor PAT>",
-       "gitUsername": "<from git config>"
-     }
-     ```
-   - See [hub-architecture.md](references/hub-architecture.md#community-library) for the full contribution flow.
+1. **Ask:** "Would you also like to **contribute** your research back to the public library? Zero effort after a one-time setup."
+2. **If yes:** Capture `git config user.name` (for slug collision avoidance), ask for the contributor PAT (from the library maintainer), store both in `config.json` under the `library` field. No git remote needed — contributions use the GitHub API. See [hub-architecture.md](references/hub-architecture.md#community-library) for the config schema and full contribution flow.
 3. **If no:** Set `library.enabled` to false in config. User can opt in later.
 4. **Continue to Phase 1** (or stop here if no topic was provided).
 
@@ -311,39 +265,15 @@ See [subgroup-discovery.md](references/subgroup-discovery.md) for search templat
 
 ### 3C-P: Product-Specific Discovery *(Product/Purchase lens only)*
 
-When the Product/Purchase lens is active, replace or augment 3A-3C with product-specific discovery:
+When the Product/Purchase lens is active, replace or augment 3A-3C with product-specific discovery. The key steps:
 
-1. **Discover product tiers/categories** in the market — do NOT assume tiers; research how the market actually segments this product type. Search for "[product type] categories" and "[product type] buying guide tiers" to find the natural groupings. Examples of how different products segment differently:
-   - Vehicles: Economy / Mid-Size / Luxury / Performance
-   - Laptops: Budget / Mainstream / Ultrabook / Workstation
-   - Boats: Day Sailor / Cruiser / Offshore / Pontoon
-   - Tires: All-Season / Summer / Winter / Performance / All-Terrain
-   - Power tools: Entry / Prosumer / Professional
-   - Espresso machines: Manual / Semi-Auto / Super-Auto
-   The right tiers are whatever the industry and buyers actually use — discover them, don't invent them.
-2. **Discover the 5-8 key differentiating specs** for this product type (the specs that actually matter for buying decisions — these vary enormously by product category)
-3. **Discover 1-2 meaningful derived metrics** — ratios that combine two specs into a single value insight. The right ratio depends entirely on the product type:
-   - Vehicles: cost per mile, cargo space per dollar
-   - Laptops: benchmark score per dollar, battery life per pound
-   - Boats: price per foot of LOA, fuel cost per hour
-   - Power tools: power-to-weight ratio, price per performance unit
-   - Espresso machines: cost per cup over 5 years, brew time per cup
-4. **Discover brands** and their market positioning (budget vs premium, specialist vs generalist)
-5. **Discover user's existing ecosystem/constraints** (batteries owned, brand loyalty, space limitations)
-6. **Discover use cases** the product serves — if 3+ distinct scenarios exist, flag Multi-Use-Case
-7. **Discover price tiers and value breakpoints** — where does quality jump relative to price?
-8. **Build product shortlist** — select 8-20 products across the full price range, including:
-   - The "obvious" popular choices everyone considers
-   - 1-2 hidden gems that experts recommend but casual buyers miss
-   - At least 3 brands represented
-   - Coverage across all discovered tiers/categories
-9. **Gather per-product data:**
-   - Manufacturer specs (official spec sheet)
-   - Street prices from 2-3 retailers with direct purchase URLs
-   - Review aggregates (stars + review count) from major retailers
-   - 1-2 expert/professional review sources
-   - Community sentiment (Reddit, forums) for real-world pros/cons
-   - Warranty info, made-in country, release year
+1. **Discover product tiers/categories** — research how the market actually segments this product type (don't assume tiers)
+2. **Discover 5-8 key differentiating specs** and **1-2 derived metrics** (ratios that combine specs into value insights)
+3. **Discover brands**, use cases, ecosystem constraints, and price/value breakpoints
+4. **Build product shortlist** — 8-20 products across the full price range (popular choices + hidden gems, 3+ brands, all tiers)
+5. **Gather per-product data** — manufacturer specs, street prices with purchase URLs, review aggregates, expert reviews, community sentiment
+
+See [product-comparison-template.md](references/product-comparison-template.md#phase-3-product-discovery) for the full 9-step discovery process with examples for each product category.
 
 ### 3D: User Checkpoint
 
@@ -493,27 +423,11 @@ When updating `config.json` and `projects/index.js`, always store the user's ori
    - Also update the local `config.json` with the `gitRepo` URL if not already set.
 
 8. **Library share (community):** If `config.json` has `library.enabled: true`:
-
-   Contributions use the **GitHub API** directly — no git remotes or local clones of the library are needed. The agent pushes project files to the `agent-contributions` branch, where a GitHub Action validates and auto-merges to `main`.
-
-   **Steps (zero-touch, no confirmation needed):**
-
-   a. **Read config:** Get `library.token`, `library.gitUsername`, and `library.branch` from config.json
-   b. **Determine library slug:** Suffix the local slug with the contributor's username: `<slug>-<gitUsername>` (e.g., `chainsaw-comparison-jdoe`)
-   c. **Get branch HEAD:** `GET /repos/mrshaun13/research-hub/git/ref/heads/agent-contributions` → get SHA, then get tree SHA from the commit
-   d. **Read the library's current `src/projects/index.js`:** `GET /repos/mrshaun13/research-hub/contents/src/projects/index.js?ref=agent-contributions` → decode content. Add the new project's registry entry (with full telemetry) and lazy component import.
-   e. **Create blobs:** For each project file (`App.jsx`, `components/*.jsx`, `data/*.js`) and the updated `index.js`, create blobs via `POST /repos/.../git/blobs`
-   f. **Create tree:** `POST /repos/.../git/trees` with `base_tree` from step (c) and all blob entries under `src/projects/<library-slug>/`
-   g. **Create commit:** `POST /repos/.../git/commits` with the new tree and parent SHA
-   h. **Update ref:** `PATCH /repos/.../git/refs/heads/agent-contributions` with the new commit SHA
-
-   All API calls use header `Authorization: token <library.token>`.
-
-   - Inform the user: "Your research has been shared with the public library. A validation workflow will run automatically — if it passes, your research will be merged to main without any manual steps."
-   - If any API call fails with 401/403: note that the library PAT may be invalid or expired and suggest the user contact the library maintainer for a new one.
-   - **Slug collision avoidance:** Library slugs are always suffixed with `gitUsername` from config (e.g., `chainsaw-comparison-jdoe`). This ensures no naming conflicts.
-
-   See [hub-architecture.md](references/hub-architecture.md#community-library) for the full architecture, validation workflow, and security model.
+   - Use the **GitHub API** to push project files to `agent-contributions` (no git remotes or local library clone needed). Library slug = `<slug>-<gitUsername>` for collision avoidance.
+   - Flow: get branch HEAD → create blobs for all project files + updated `index.js` → create tree → create commit → update ref. All calls use `Authorization: token <library.token>`.
+   - Inform the user: "Your research has been shared. A validation workflow will auto-merge it to main if it passes."
+   - If 401/403: PAT may be invalid — suggest contacting the library maintainer.
+   - See [hub-architecture.md](references/hub-architecture.md#agent-side-contribution-flow-phase-7-step-8) for the complete step-by-step API flow.
 
 **Product/Purchase lens:** See [product-comparison-template.md](references/product-comparison-template.md#phase-7-additions-product-qa) for product-specific QA checks.
 
