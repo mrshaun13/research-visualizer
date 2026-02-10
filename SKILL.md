@@ -116,10 +116,11 @@ Phase 0 should be **fast**. If the hub exists, it's a 2-second check. If it's fi
 Parse natural language into research parameters. No structured input required.
 
 **Valid inputs:**
-- "Research sexual behavior trends and the adult entertainment industry across American generations"
-- "How has drug use changed in America since the 1960s?"
+- "How has homeownership changed in America since the 1950s?"
+- "Research the rise and fall of shopping malls in the US"
 - "Compare remote work vs office work outcomes since COVID"
-- "I'm looking to buy a chainsaw" *(triggers Product/Purchase lens)*
+- "How has commercial aviation safety improved over time?"
+- "I'm looking to buy a boat for weekend fishing" *(triggers Product/Purchase lens)*
 - "Help me pick a good laptop for software development" *(triggers Product/Purchase lens)*
 - "What's the best SUV for a family of 5?" *(triggers Product/Purchase lens)*
 
@@ -127,17 +128,17 @@ Parse natural language into research parameters. No structured input required.
 
 1. **Extract core topic** — what is being studied?
 2. **Extract implied populations** — map casual references to researchable groups:
-   - "the adult industry" → adult entertainment workers (subgroups TBD)
-   - "people as far back as the 30s" → birth cohorts from ~1930 onward
+   - "shopping malls" → retail industry, consumers, commercial real estate (subgroups TBD)
+   - "people as far back as the 50s" → population cohorts from ~1950 onward
 3. **Extract time scope** — map to temporal boundaries (do NOT choose segmentation yet):
-   - "across generations" → all living/recent generations
+   - "over time" → full available historical range
    - "since the 60s" → 1960-present
 4. **Extract research intent** — trends over time? group comparison? impact analysis?
 5. **Classify into research lenses** (triggers automatic dimensions in Phase 3):
    - **Population lens** → demographics, health, economic, social
    - **Behavior lens** → prevalence, taxonomy, outcomes
    - **Industry lens** → market size, revenue, worker conditions
-   - **Culture lens** → generational shifts, media, public opinion
+   - **Culture lens** → societal shifts over time, media, public opinion
    - **Product/Purchase lens** → product specs, pricing, brand comparison, value analysis, purchase recommendations
    - Most topics combine 2-3 lenses. The Product/Purchase lens is special — when detected, it activates Phase 1B and overrides much of the standard pipeline with product-specific scaffolding.
 
@@ -206,11 +207,14 @@ Understand the research landscape before diving deep.
    - Temporal inflection points
    - Data availability (rich vs sparse areas)
 
-3. **Determine temporal segmentation:**
-   - **Generations** — social/cultural topics spanning 50+ years
-   - **Decades** — economic/industry topics or shorter spans
-   - **Policy eras** — regulation-driven topics
-   - **Technology eras** — tech-driven topics
+3. **Determine temporal segmentation** — choose the lens that reveals the most interesting story, not the most obvious one:
+   - **Inflection-point eras** — segment around pivotal events, inventions, or crises that changed the trajectory (often the most narratively compelling)
+   - **Policy/regulatory eras** — when laws, regulations, or institutional changes drove the shifts
+   - **Technology eras** — when new technology created before/after discontinuities
+   - **Decades** — neutral, works for any topic, good default when no clear inflection points exist
+   - **Generations** — only when the research is explicitly about age-cohort identity or attitudes
+   
+   **Guiding principle:** The best segmentation is the one where the data looks *different* on either side of the boundary. If a timeline split doesn't reveal a meaningful change, it's the wrong split.
 
 **Product/Purchase lens additions to Phase 2:**
 
@@ -274,12 +278,21 @@ See [subgroup-discovery.md](references/subgroup-discovery.md) for search templat
 
 When the Product/Purchase lens is active, replace or augment 3A-3C with product-specific discovery:
 
-1. **Discover product tiers/categories** in the market (e.g., Entry/Farm/Pro for chainsaws, Power Tool/Precision/Duster for blowers)
-2. **Discover the 5-8 key differentiating specs** for this product type (the specs that actually matter for buying decisions)
-3. **Discover 1-2 meaningful derived metrics** — ratios that combine two specs into a single value insight:
-   - Power-to-weight ratio (HP ÷ lbs)
-   - Price per performance unit ($ ÷ HP, $ ÷ CFM)
-   - Cost per capacity ($ ÷ cubic feet, $ ÷ watt-hours)
+1. **Discover product tiers/categories** in the market — do NOT assume tiers; research how the market actually segments this product type. Search for "[product type] categories" and "[product type] buying guide tiers" to find the natural groupings. Examples of how different products segment differently:
+   - Vehicles: Economy / Mid-Size / Luxury / Performance
+   - Laptops: Budget / Mainstream / Ultrabook / Workstation
+   - Boats: Day Sailor / Cruiser / Offshore / Pontoon
+   - Tires: All-Season / Summer / Winter / Performance / All-Terrain
+   - Power tools: Entry / Prosumer / Professional
+   - Espresso machines: Manual / Semi-Auto / Super-Auto
+   The right tiers are whatever the industry and buyers actually use — discover them, don't invent them.
+2. **Discover the 5-8 key differentiating specs** for this product type (the specs that actually matter for buying decisions — these vary enormously by product category)
+3. **Discover 1-2 meaningful derived metrics** — ratios that combine two specs into a single value insight. The right ratio depends entirely on the product type:
+   - Vehicles: cost per mile, cargo space per dollar
+   - Laptops: benchmark score per dollar, battery life per pound
+   - Boats: price per foot of LOA, fuel cost per hour
+   - Power tools: power-to-weight ratio, price per performance unit
+   - Espresso machines: cost per cup over 5 years, brew time per cup
 4. **Discover brands** and their market positioning (budget vs premium, specialist vs generalist)
 5. **Discover user's existing ecosystem/constraints** (batteries owned, brand loyalty, space limitations)
 6. **Discover use cases** the product serves — if 3+ distinct scenarios exist, flag Multi-Use-Case
@@ -440,11 +453,11 @@ Build curated picks with these award categories (select 5-7 that fit):
 - **Most Comfortable / Ergonomic** — if comfort is a differentiator
 - **Best Using Your [Ecosystem]** — if user has existing ecosystem
 
-Also build **multi-tier purchase options** (2-4 strategies):
-- **Option A** — Best of Both Worlds (premium combo, ~$X total)
-- **Option B** — Best Value (good-enough combo, ~$X total)
-- **Option C** — Single Tool (one product covers most needs, ~$X)
-- **Option D** — Ultra-Budget (cheapest viable path, ~$X)
+Also build **multi-tier purchase options** (2-4 strategies at different price points). Adapt the framing to the product type — not every product involves buying multiples:
+- **Option A** — Premium / No Compromises (~$X) — the best available, cost secondary
+- **Option B** — Best Value (~$X) — strong performance without overpaying
+- **Option C** — Budget-Smart (~$X) — meets core needs at the lowest reasonable cost
+- **Option D** — [Context-specific] (~$X) — adapt to the product (e.g., "Best for Your Ecosystem" if batteries matter, "Best Starter Setup" for hobby gear, "Best Combo" if buying two products makes sense)
 
 ---
 

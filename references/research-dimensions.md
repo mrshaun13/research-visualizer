@@ -50,7 +50,7 @@ Triggered when studying cultural phenomena.
 
 | Dimension | What to Gather |
 |---|---|
-| Generational attitudes | How do different cohorts view this topic? |
+| Shifting attitudes across eras | How have different time periods or cohorts viewed this topic? |
 | Media representation | How is this portrayed in media over time? |
 | Public opinion | Polling data, acceptance/stigma trends |
 | Policy/legal | Regulatory changes, legal status over time |

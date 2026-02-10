@@ -11,7 +11,7 @@ Use this to decide whether to split a population into subgroups:
 | <20% difference across all metrics | MERGE — splitting adds noise without insight |
 | Subgroup has <3 data sources available | NOTE as data-limited; include if possible, caveat if not |
 | >5 potential subgroups | Keep top 3-4 most distinct; merge the rest into "other" |
-| Subgroup only exists for part of the time axis | Include with clear notation (e.g., "cam performers: Gen X onward") |
+| Subgroup only exists for part of the time axis | Include with clear notation (e.g., "streaming services: 2007 onward", "e-commerce retailers: 1990s onward") |
 
 ## Taxonomy Discovery Search Templates
 
@@ -22,7 +22,7 @@ Use these search patterns to discover domain-specific category lists:
 "[topic] types classification"
 "[topic] taxonomy [academic field]"
 "most common [topic items] prevalence study"
-"[platform] [topic] categories" (e.g., "Pornhub categories", "Spotify genres")
+"[platform] [topic] categories" (e.g., "Spotify genres", "Steam game tags", "USDA food categories")
 "[topic] survey categories [major study name]"
 "top [N] [topic items] by [metric]"
 ```

@@ -12,9 +12,9 @@ After detecting the Product/Purchase lens, classify the product before proceedin
 
 | Tier | Lifespan | Examples | Key Implications |
 |------|----------|----------|-----------------|
-| **Durable / Investment** | 5+ years | Chainsaws, vehicles, appliances, HVAC, furniture, power tools (pro-grade), musical instruments | Include TCO, Features Matrix, Avoid List, Derived Metrics, long-term maintenance analysis |
+| **Durable / Investment** | 5+ years | Vehicles, appliances, HVAC, furniture, boats, pro-grade tools, musical instruments | Include TCO, Features Matrix, Avoid List, Derived Metrics, long-term maintenance analysis |
 | **Semi-Durable** | 1–5 years | Phones, laptops, cameras, mid-range power tools, small appliances, gaming consoles | Include partial TCO (2-3 year), Ecosystem analysis, Use Case Matrix |
-| **Consumable / Short-Life** | <1 year | Compact blowers, accessories, cables, consumables, budget tools | Skip TCO entirely, focus on Use Case Fit, Purchase Links, immediate value |
+| **Consumable / Short-Life** | <1 year | Accessories, cables, consumables, budget tools, phone cases | Skip TCO entirely, focus on Use Case Fit, Purchase Links, immediate value |
 
 ### Product Characteristic Flags
 
@@ -23,8 +23,8 @@ Detect these during classification — each triggers specific sections:
 | Flag | Detection Signal | Triggers |
 |------|-----------------|----------|
 | **Ecosystem Dependency** | Product requires batteries, subscriptions, platforms, or proprietary accessories | Ecosystem Comparison section |
-| **Multi-Use-Case** | Product serves 3+ distinct scenarios (e.g., PC cleaning + garage + outdoor) | Use Case Matrix + Radar Chart |
-| **High Feature Density** | 6+ boolean yes/no features that differentiate products (e.g., anti-vibration, decomp valve, LED) | Features Matrix section |
+| **Multi-Use-Case** | Product serves 3+ distinct scenarios (e.g., commuting + road trips + off-road for vehicles; home + travel + office for electronics) | Use Case Matrix + Radar Chart |
+| **High Feature Density** | 6+ boolean yes/no features that differentiate products (e.g., wireless charging, water resistance, USB-C for electronics; heated seats, backup camera, AWD for vehicles) | Features Matrix section |
 | **Clear Market Tiers** | Products span obvious quality/price tiers (entry/mid/pro, economy/mid/luxury) | Tier system with badges and tier-filtered views |
 | **Derived Metric Opportunity** | Two specs combine into a meaningful ratio (power÷weight, price÷performance, cost÷capacity) | Derived metric charts + scatter plots |
 | **Existing User Ecosystem** | User mentions owning batteries, tools, or being in a specific brand ecosystem | Ecosystem section highlighted with "Your System" badge |
@@ -38,7 +38,7 @@ Even from minimal input, extract or infer:
 - **Key constraints** (weight, noise, size, brand preference, existing ecosystem)
 - **Primary use case** (what will they do with it most often)
 
-If the user provides almost nothing (e.g., "I want to buy a chainsaw"), make reasonable assumptions based on the most common buyer profile for that product and state them in the Overview InsightCallout. The user can correct at the checkpoint.
+If the user provides almost nothing (e.g., "I want to buy a laptop"), make reasonable assumptions based on the most common buyer profile for that product and state them in the Overview InsightCallout. The user can correct at the checkpoint.
 
 ---
 
@@ -55,9 +55,9 @@ If the user provides almost nothing (e.g., "I want to buy a chainsaw"), make rea
 
 | Section | Build When | Example |
 |---------|-----------|---------|
-| **Cost Analysis / TCO** | Lifecycle = Durable or Semi-Durable | 5-year stacked bar: purchase + fuel + maintenance + consumables |
-| **[Primary Metric] Deep Dive** | Always if 2+ important performance metrics exist | "Power & Performance" for chainsaws, "Airflow Analysis" for blowers |
-| **[Secondary Metric] Analysis** | When a second important dimension exists | "Weight & Ergonomics" for chainsaws, "Noise Levels" for appliances |
+| **Cost Analysis / TCO** | Lifecycle = Durable or Semi-Durable | 5-year stacked bar: purchase + energy/fuel + maintenance + consumables |
+| **[Primary Metric] Deep Dive** | Always if 2+ important performance metrics exist | "Performance & Speed" for laptops, "Fuel Economy" for vehicles, "Brew Quality" for espresso machines |
+| **[Secondary Metric] Analysis** | When a second important dimension exists | "Portability & Weight" for laptops, "Comfort & Noise" for vehicles, "Ease of Use" for appliances |
 | **Features Matrix** | High Feature Density flag | Boolean checklist table with feature score per product |
 | **Use Case Fit** | Multi-Use-Case flag | Rated grid per use case + Radar chart for top contenders |
 | **Ecosystem Comparison** | Ecosystem Dependency flag | Ecosystem cards with tool counts, battery ranges, costs, compatibility notes |
@@ -84,7 +84,7 @@ export const products = [
     // ── Classification ──
     tier: 'Entry / Mid / Pro',           // [conditional] market tier
     category: 'Category Name',           // [conditional] product category
-    powerType: 'Gas / Battery / Corded', // [conditional] power source
+    variantType: 'Type A / Type B / Type C', // [conditional] product variant axis (e.g., gas/battery/corded, manual/automatic, wired/wireless)
     
     // ── Pricing ──
     price: 499.99,                       // primary price (MSRP or street)
@@ -215,19 +215,19 @@ export const getAggregateRating = (productId) => {
 **Always includes:**
 - **Stat cards** (2x2 or 4-across grid): Products compared, Brands, Price range, one product-specific stat
 - **Primary InsightCallout**: User profile summary + where their sweet spot is
-- **Primary scatter plot**: The two most important competing metrics (price vs performance, CFM vs MPH, etc.)
+- **Primary scatter plot**: The two most important competing metrics (price vs performance, weight vs battery life, etc.)
 - **Secondary insight**: Key takeaway from the data
 
 **Optionally includes:**
 - Radar chart (when Multi-Use-Case)
 - Pie/bar for category distribution
-- Gas vs Battery / Power type comparison (when relevant)
+- Variant type comparison (when relevant — e.g., manual vs automatic, wired vs wireless, gas vs electric)
 
 ### 3. Comparison Table
 
 **Always includes:**
 - Sortable column headers (click to sort asc/desc)
-- Filter controls (by tier, brand, category, power type — whichever are relevant)
+- Filter controls (by tier, brand, category, variant type — whichever are relevant)
 - Brand color dot per row
 - Expandable row detail on click
 - 8-12 columns covering: name, brand, tier/category, price, top 4-5 specs, key boolean, warranty
@@ -271,8 +271,8 @@ export const getAggregateRating = (productId) => {
 ### 6. InsightCallout Variants
 
 Use throughout all sections. Support these variants:
-- **info** (blue): Explanatory context, definitions, "here's what CFM vs MPH means"
-- **warning** (amber): Important caveats, "the cheapest saw to BUY is often the most expensive to OWN"
+- **info** (blue): Explanatory context, definitions, "here's what [key spec] vs [key spec] means for your decision"
+- **warning** (amber): Important caveats, "the cheapest option to BUY is often the most expensive to OWN"
 - **recommendation** (emerald/green): Direct advice, "your ideal setup is..."
 - **critical** (red): The #1 metric or most important finding
 - **highlight** (purple): Surprising or counterintuitive findings
@@ -286,8 +286,8 @@ Use throughout all sections. Support these variants:
 - **Price comparison bar chart**: All products sorted by price, color-coded by brand
 - **Value scatter**: Price vs primary performance metric (dots in upper-left = best value)
 - **Price per [key metric]**: Derived value metric bar chart
-- **5-Year TCO stacked bar** (Durable only): Purchase + fuel/energy + maintenance + consumables
-  - Include assumptions footnote (usage hours/year, fuel costs, etc.)
+- **5-Year TCO stacked bar** (Durable only): Purchase + energy/fuel + maintenance + consumables
+  - Include assumptions footnote (usage frequency, energy/fuel costs, etc.)
 - **InsightCallout**: "The value paradox" — cheapest to buy ≠ cheapest to own
 
 ### Features Matrix (High Feature Density only)
@@ -343,15 +343,15 @@ export const TIER_COLORS = {
 | What You're Showing | Chart Type | Example |
 |---------------------|-----------|---------|
 | Products ranked by one spec | Horizontal bar (sorted) | Weight comparison, price comparison |
-| Two competing specs | Scatter plot | Price vs HP, CFM vs MPH |
-| Derived value metric | Horizontal bar (sorted, color = quality indicator) | Price per HP (green = magnesium, gray = plastic) |
+| Two competing specs | Scatter plot | Price vs performance, weight vs battery life, speed vs capacity |
+| Derived value metric | Horizontal bar (sorted, color = quality indicator) | Price per performance unit (color = quality tier or material class) |
 | TCO breakdown | Stacked horizontal bar | Purchase + fuel + maintenance + consumables |
 | Category/tier distribution | Vertical bar or pie | Models by tier, models by brand |
 | Use case fit across products | Heatmap-style grid or rated dots | 1-5 rating per use case |
 | Top contenders across dimensions | Radar chart | 4-5 products × 4 use cases |
 | Boolean features | Checklist matrix table | Features × products with check/X |
-| Price distribution by type | Grouped vertical bar | Gas vs Battery price brackets |
-| Two metrics quick comparison | Side-by-side stat cards | Gas avg weight vs Battery avg weight |
+| Price distribution by type | Grouped vertical bar | Price brackets by variant type (e.g., manual vs automatic, wired vs wireless) |
+| Two metrics quick comparison | Side-by-side stat cards | Avg weight by variant type, avg price by tier |
 
 ---
 

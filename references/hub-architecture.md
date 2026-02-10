@@ -18,13 +18,13 @@ This file is the **installation detection marker**. If it exists, the hub has be
   "port": 5180,
   "projects": [
     {
-      "slug": "chainsaw-comparison",
-      "title": "Gas Chainsaw Comparison",
+      "slug": "espresso-machine-comparison",
+      "title": "Home Espresso Machine Comparison",
       "subtitle": "Product Comparison Dashboard",
-      "query": "I'm looking to buy a gas chainsaw for property maintenance",
+      "query": "I'm looking to buy an espresso machine for home use",
       "lens": "product",
-      "icon": "axe",
-      "accentColor": "orange",
+      "icon": "Coffee",
+      "accentColor": "amber",
       "createdAt": "2026-02-09T12:00:00Z",
       "updatedAt": "2026-02-09T14:00:00Z"
     }
@@ -65,8 +65,8 @@ Every project tracks telemetry about its creation and the research run that prod
   "durationMinutes": 150,
   "includedSetup": false,
   "skillVersion": "4.0",
-  "userPrompt": "I'm looking to buy a gas chainsaw for property maintenance",
-  "researchPlan": "PRODUCT TYPE: Gas Chainsaw\nLIFECYCLE: Durable / Investment\n...",
+  "userPrompt": "I'm looking to buy an espresso machine for home use",
+  "researchPlan": "PRODUCT TYPE: Espresso Machine\nLIFECYCLE: Semi-Durable\n...",
   "checkpointModified": false,
   "model": "claude-sonnet-4-20250514",
   "tokenUsage": null,
@@ -283,7 +283,7 @@ estimatedMinutes = readingMinutes + chartExplorationMinutes + interactiveOverhea
         │   │   └── ...
         │   └── data/
         │       └── ciscoData.js
-        └── chainsaw-comparison/
+        └── espresso-machine-comparison/
             ├── App.jsx
             ├── components/
             │   ├── Overview.jsx
@@ -314,20 +314,20 @@ export const projectRegistry = [
     createdAt: '2026-02-08T12:00:00Z',
   },
   {
-    slug: 'chainsaw-comparison',
-    title: 'Gas Chainsaw Comparison',
+    slug: 'espresso-machine-comparison',
+    title: 'Home Espresso Machine Comparison',
     subtitle: 'Product Comparison Dashboard',
-    query: "I'm looking to buy a gas chainsaw",
+    query: "I'm looking to buy an espresso machine for home use",
     lens: 'product',
-    icon: 'Axe',
-    accentColor: 'orange',
+    icon: 'Coffee',
+    accentColor: 'amber',
     createdAt: '2026-02-09T12:00:00Z',
   },
 ];
 
 export const projectComponents = {
   'cisco-history-dashboard': lazy(() => import('./cisco-history-dashboard/App')),
-  'chainsaw-comparison': lazy(() => import('./chainsaw-comparison/App')),
+  'espresso-machine-comparison': lazy(() => import('./espresso-machine-comparison/App')),
 };
 ```
 
