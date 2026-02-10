@@ -795,66 +795,70 @@ ReactDOM.createRoot(document.getElementById('root')).render(
 
 ### vite.config.js
 
-**Note:** The `@public-library` alias is only added during Phase 0B-LIBRARY. During initial scaffold (Phase 0B-SCAFFOLD), omit the alias. Phase 0B-LIBRARY adds it.
+**Note:** This single template works for ALL setups — with or without libraries. Library aliases are resolved dynamically from `.local-config.json` (gitignored, created by skill during Phase 0). No manual edits needed when libraries are added or removed.
 
-**Initial scaffold (no library yet):**
-```js
-import { defineConfig } from 'vite';
-import react from '@vitejs/plugin-react';
-
-export default defineConfig({
-  plugins: [react()],
-  server: {
-    port: 5180,
-    host: true,
-  },
-});
-```
-
-**After Phase 0B-LIBRARY adds the alias:**
 ```js
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
+import { readFileSync, existsSync } from 'fs';
+
+// Read machine-local config for library paths (gitignored, created by skill during Phase 0)
+const localConfigPath = path.resolve(__dirname, '.local-config.json');
+const localConfig = existsSync(localConfigPath)
+  ? JSON.parse(readFileSync(localConfigPath, 'utf-8'))
+  : {};
+
+// Build Vite aliases dynamically from configured libraries
+const aliases = {};
+if (localConfig.libraries) {
+  for (const lib of localConfig.libraries) {
+    if (lib.alias && lib.localPath) {
+      aliases[lib.alias] = path.resolve(lib.localPath, 'src');
+    }
+  }
+}
 
 export default defineConfig({
   plugins: [react()],
+  build: {
+    target: 'esnext',
+  },
   server: {
     port: 5180,
     host: true,
   },
   resolve: {
-    alias: {
-      '@public-library': path.resolve('<publicLibrary.path>', 'src'),
-    },
+    alias: aliases,
   },
 });
 ```
 
 ### tailwind.config.js
 
-**Note:** When the public library is configured, add its `src/` to the content array so Tailwind scans library component classes.
+**Note:** This single template works for ALL setups. Library content paths are resolved dynamically from `.local-config.json` so Tailwind scans library component classes. No manual edits needed when libraries are added or removed.
 
-**Initial scaffold:**
 ```js
-/** @type {import('tailwindcss').Config} */
-export default {
-  content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],
-  theme: {
-    extend: {},
-  },
-  plugins: [],
-};
-```
+import { readFileSync, existsSync } from 'fs';
+import { resolve } from 'path';
 
-**After Phase 0B-LIBRARY:**
-```js
+// Read machine-local config for library paths (same file vite.config.js uses)
+const localConfigPath = resolve(import.meta.dirname || '.', '.local-config.json');
+const localConfig = existsSync(localConfigPath)
+  ? JSON.parse(readFileSync(localConfigPath, 'utf-8'))
+  : {};
+
+// Build content paths from configured libraries
+const libraryContentPaths = (localConfig.libraries || [])
+  .filter(lib => lib.localPath)
+  .map(lib => `${lib.localPath}/src/**/*.{js,ts,jsx,tsx}`);
+
 /** @type {import('tailwindcss').Config} */
 export default {
   content: [
     './index.html',
     './src/**/*.{js,ts,jsx,tsx}',
-    '<publicLibrary.path>/src/**/*.{js,ts,jsx,tsx}',
+    ...libraryContentPaths,
   ],
   theme: {
     extend: {},
@@ -896,6 +900,7 @@ node_modules/
 dist/
 .DS_Store
 *.local
+.local-config.json
 ```
 
 ### package.json

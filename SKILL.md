@@ -12,7 +12,7 @@ license: MIT
 compatibility: Requires internet access for web search and data fetching.
 metadata:
   author: mrshaun13
-  version: "5.1"
+  version: "6.0"
 ---
 
 # Deep Research → Interactive Dashboard Pipeline
@@ -45,82 +45,139 @@ Before any research begins, check whether the Research Hub is already installed.
 
 See [hub-architecture.md](references/hub-architecture.md) for the complete config schema, directory structure, and project registry format.
 
+### Config Architecture (Two-Layer)
+
+The skill uses a **two-layer config** to make the entire setup portable across machines:
+
+1. **Pointer config** (machine-local, `~/.codeium/windsurf/skills/research-visualizer/config.json`):
+   - Contains ONLY `personalHubPath` — the absolute path to the user's personal hub repo on this machine.
+   - This is the **installation detection marker**. If it exists, the hub has been set up on this machine.
+   - Never committed to any repo.
+
+2. **Portable config** (`<personalHubPath>/hub-config.json`, git-synced):
+   - Contains everything else: port, gitRepo, libraries array, projects array, telemetry.
+   - Committed to the personal hub repo — syncs across machines automatically via git.
+   - The personal hub repo IS the portable unit: clone it on a new machine, point the skill at it, done.
+
+3. **Machine-local vite config** (`<personalHubPath>/.local-config.json`, gitignored):
+   - Contains machine-specific library paths for Vite aliases (e.g., where the public library is cloned locally).
+   - Created by the skill during Phase 0 setup. Read by `vite.config.js` at dev server startup.
+   - Supports multiple libraries via an array of `{ name, alias, localPath }` entries.
+
 ### No-Topic Invocation
 
 If the user invokes the skill **without a research topic** (e.g., "start research hub", "open my research", "browse the library"):
 - Run Detection and setup as normal (Phase 0, 0B, 0C as needed)
 - Start the dev server if not running, open browser preview
-- **Do NOT proceed to Phase 1** — the user just wants to browse. Inform them: "Your Research Hub is running. You can browse your local research and the public library."
+- **Do NOT proceed to Phase 1** — the user just wants to browse. Inform them: "Your Research Hub is running. You can browse your local research and any configured libraries."
 
 ### Detection
 
-1. **Check for config file:** `~/.codeium/windsurf/skills/research-visualizer/config.json`
-2. **If config exists:**
-   - Read `hubPath` from config
-   - **Git sync:** If the hub has a `.git` remote, run `git pull` (stash first if uncommitted changes). Note if new projects were pulled.
-   - **Public library sync:** If `publicLibrary.path` exists in config, run `git -C <publicLibrary.path> pull` to fetch latest community research.
+1. **Check for pointer config:** `~/.codeium/windsurf/skills/research-visualizer/config.json`
+2. **If pointer exists:**
+   - Read `personalHubPath` from pointer
+   - Read `hub-config.json` from `<personalHubPath>/hub-config.json` for all portable settings
+   - **Git sync (personal):** If the hub has a `.git` remote, run `git pull` (stash first if uncommitted changes). Note if new projects were pulled.
+   - **Library sync:** For each library in `hub-config.json` `libraries` array where `browseEnabled` is true, check if `.local-config.json` has a `localPath` for it. If so, run `git -C <localPath> pull` to fetch latest community research.
    - Check if Vite dev server is running on configured port (default 5180)
    - If no topic provided → start server if needed, open browser, stop here
    - If topic provided → **Skip to Phase 1**
-3. **If config does NOT exist → First-Time Setup (Phase 0B)**
+3. **If pointer does NOT exist → First-Time Setup (Phase 0B)**
 
 ### Phase 0B: First-Time Setup
 
-This runs ONCE, the very first time the skill is invoked on a machine.
+This runs ONCE per machine. The goal is to either clone an existing personal hub or scaffold a new one, then create the machine-local pointer.
 
 1. **Inform the user immediately:**
    > "I see this is your first time running Research Visualizer on this machine. I'll set up a **Research Hub** — a single web app that will host all your research dashboards in one place. You'll never need multiple dev servers again."
 
-2. **Ask about existing hub (git sync):**
-   > "Do you have an existing Research Hub git repo from another machine? If so, I can clone it and you'll have all your previous research instantly. If not, I'll create a fresh one."
-   >
-   > "It's highly recommended to back your hub to a git repo — it lets you sync research across machines and keeps everything versioned."
+2. **Ask about existing hub:**
+   > "Do you have an existing personal Research Hub git repo from another machine? If so, I can clone it and you'll have all your previous research, settings, and library configs instantly. If not, I'll create a fresh one."
 
    - **If the user provides a git repo URL → Phase 0B-CLONE**
    - **If the user says no / skip → Phase 0B-SCAFFOLD**
 
 #### Phase 0B-CLONE: Clone Existing Hub
 
-1. **Ask for install location:** Default: `~/research-hub/`
+1. **Ask for install location:** Default: `~/git/personal-research-hub/`
 2. **Clone the repo:** `git clone <repo-url> <chosen-path>`
 3. **Run `npm install`** in the cloned directory
-4. **Read the project registry** from `src/projects/index.js` to discover existing projects
-5. **Create config.json** per the schema in [hub-architecture.md](references/hub-architecture.md#config-file) — populate `hubPath`, `gitRepo`, and `projects` from the cloned registry.
-6. **Inform the user:** "Cloned your Research Hub with N existing projects."
-7. **Continue to Phase 0B-LIBRARY.**
+4. **Read `hub-config.json`** from the cloned repo — this has all projects, library configs, and settings already.
+5. **Create pointer config** at `~/.codeium/windsurf/skills/research-visualizer/config.json`:
+   ```json
+   { "personalHubPath": "<chosen-path>" }
+   ```
+6. **Create `.local-config.json`** in the hub directory — for each library in `hub-config.json` `libraries` array where `browseEnabled` is true, ask the user where the library is cloned (or offer to clone it). Populate the `libraries` array with `{ name, alias, localPath }` entries.
+7. **Inform the user:** "Cloned your Research Hub with N existing projects and M library connections."
+8. **Continue to Phase 0B-LIBRARIES.**
 
 #### Phase 0B-SCAFFOLD: Create Fresh Hub
 
-1. **Ask for hub location:** Default: `~/research-hub/`
-2. **Scaffold the hub app** — copy every file verbatim from [hub-scaffold-templates.md](references/hub-scaffold-templates.md) (no `@public-library` alias yet — added in Phase 0B-LIBRARY).
+1. **Ask for hub location:** Default: `~/git/personal-research-hub/`
+2. **Scaffold the hub app** — copy every file verbatim from [hub-scaffold-templates.md](references/hub-scaffold-templates.md). The `vite.config.js` template reads from `.local-config.json` dynamically (no hardcoded paths).
 3. **Run `npm install`**
-4. **Initialize git repo:** `git init`, `git branch -m main`, `.gitignore` (node_modules/, dist/, .DS_Store, *.local). Ask about connecting a remote — if provided, push; if skipped, local only.
-5. **Create config.json** per the schema in [hub-architecture.md](references/hub-architecture.md#config-file) — set `hubPath`, `port: 5180`, `gitRepo` (or null), empty `projects` array.
-6. **Continue to Phase 0B-LIBRARY.**
+4. **Initialize git repo:** `git init`, `git branch -m main`, `.gitignore` (node_modules/, dist/, .DS_Store, *.local, .local-config.json). Ask about connecting a remote — if provided, push; if skipped, local only.
+5. **Create `hub-config.json`** in the hub directory — set `version: "2.0"`, `port: 5180`, `gitRepo` (or null), empty `libraries` array, empty `projects` array.
+6. **Create pointer config** at `~/.codeium/windsurf/skills/research-visualizer/config.json`:
+   ```json
+   { "personalHubPath": "<chosen-path>" }
+   ```
+7. **Create empty `.local-config.json`** in the hub directory: `{ "libraries": [] }`
+8. **Continue to Phase 0B-LIBRARIES.**
 
-### Phase 0B-LIBRARY: Public Library Browse (One-Time Only)
+### Phase 0B-LIBRARIES: Library Setup (One-Time Per Library)
 
-**Skip if `config.json` already has a `publicLibrary` field.** No authentication needed — the library is a public repo.
+**Skip if `hub-config.json` already has a non-empty `libraries` array.** This phase handles both browsing AND contributing for each library. Multiple libraries can be configured.
 
-1. **Ask:** "Would you like to browse the **public Research Library**? Community-contributed dashboards you can explore alongside your own. No account needed."
-2. **If yes:** Clone read-only: `git clone https://github.com/mrshaun13/research-hub.git <hubPath>/../research-library`. Add `publicLibrary.path` to config. Add `@public-library` Vite alias. Run `npm install` if needed. See [hub-architecture.md](references/hub-architecture.md#public-library-browse) for alias config and UI integration.
-3. **If no:** Set `"publicLibrary": { "path": null }` in config. User can add it later.
-4. **Continue to Phase 0C.**
+For each library the user wants to add (start with the default Community Research Hub):
 
-### Phase 0C: Community Library Contribution (One-Time Only)
+1. **Ask about browsing:**
+   > "Would you like to browse the **Community Research Hub**? Community-contributed dashboards you can explore alongside your own. No account needed — it's a public repo."
 
-**Skip entirely if `config.json` already has a `library` field.** This is about *contributing* research, not browsing.
+2. **If yes to browsing:**
+   - Clone read-only: `git clone https://github.com/mrshaun13/research-hub.git <hubPath>/../research-hub` (or ask user for location)
+   - Add library entry to `hub-config.json` `libraries` array with `browseEnabled: true`
+   - Add entry to `.local-config.json` `libraries` array with `{ name, alias: "@public-library", localPath: "<clone-path>" }`
+   - Run `npm install` in the library clone if needed
 
-1. **Ask:** "Would you also like to **contribute** your research back to the public library? Zero effort after a one-time setup."
-2. **If yes:** Capture `git config user.name` (for slug collision avoidance), ask for the contributor PAT (from the library maintainer), store both in `config.json` under the `library` field. No git remote needed — contributions use the GitHub API. See [hub-architecture.md](references/hub-architecture.md#community-library) for the config schema and full contribution flow.
-3. **If no:** Set `library.enabled` to false in config. User can opt in later.
-4. **Continue to Phase 1** (or stop here if no topic was provided).
+3. **Ask about contributing:**
+   > "Would you also like to **contribute** your research back to this library? Zero effort after a one-time setup — your agent pushes via the GitHub API after each build."
+
+4. **If yes to contributing:**
+   - Capture `git config user.name` (for slug collision avoidance)
+   - Ask for the contributor PAT (from the library maintainer). **Note:** The user does NOT need their own GitHub account or any git setup. The PAT is all that's needed — the agent uses the GitHub API directly.
+   - Update the library entry in `hub-config.json`: set `contributeEnabled: true`, `token`, `gitUsername`, `branch: "agent-contributions"`
+
+5. **If no to browsing:** Add library entry with `browseEnabled: false`. User can enable later.
+6. **If no to contributing:** Set `contributeEnabled: false` in the library entry. User can opt in later.
+
+7. **Ask if the user wants to add another library:**
+   > "Do you have any other shared research libraries to connect? (You can always add more later.)"
+   - If yes → repeat steps 1-6 for the new library
+   - If no → continue
+
+8. **Continue to Phase 1** (or stop here if no topic was provided).
+
+### Backwards Compatibility
+
+The skill works with **any combination** of these features:
+
+| Personal Git Repo | Libraries | Contribution | What Works |
+|---|---|---|---|
+| ✗ | ✗ | ✗ | Local-only research. No sync, no browsing, no sharing. Fully functional. |
+| ✓ | ✗ | ✗ | Personal research syncs across machines via git. No public library. |
+| ✗ | ✓ (browse) | ✗ | Browse community research. Personal research is local-only. |
+| ✓ | ✓ (browse) | ✗ | Full sync + browse community. No contributions. |
+| ✗ | ✓ (browse) | ✓ | Browse + contribute. No personal git sync. Agent uses GitHub API to contribute (no local git needed). |
+| ✓ | ✓ (browse) | ✓ | Full experience: sync, browse, contribute. |
+
+**Key principle:** No feature depends on another. A user with zero GitHub setup gets a fully functional local research hub.
 
 **Telemetry:** Initialize the telemetry object at the start of Phase 0. See [hub-architecture.md](references/hub-architecture.md#telemetry-schema) for the complete schema, capture timing, and formulas.
 
 ### Key Principle
 
-Phase 0 should be **fast**. If the hub exists, it's a 2-second check. If it's first-time, the setup conversation is brief and then research proceeds normally.
+Phase 0 should be **fast**. If the hub exists, it's a 2-second check (read pointer → read hub-config → git pull → go). If it's first-time, the setup conversation is brief and then research proceeds normally.
 
 ---
 
@@ -362,21 +419,22 @@ See [build-templates.md](references/build-templates.md) for data schemas, compon
 
 ### Steps:
 
-1. **Read config.json** to get `hubPath`
-2. **Generate a slug** for the new project (kebab-case from topic, e.g., "cisco-history-dashboard")
-3. **Create project directory:** `<hubPath>/src/projects/<slug>/`
-4. **Write project files** into that directory:
+1. **Read pointer config** (`~/.codeium/windsurf/skills/research-visualizer/config.json`) to get `personalHubPath`
+2. **Read `hub-config.json`** from `<personalHubPath>/hub-config.json` for port and project list
+3. **Generate a slug** for the new project (kebab-case from topic, e.g., "cisco-history-dashboard")
+4. **Create project directory:** `<personalHubPath>/src/projects/<slug>/`
+5. **Write project files** into that directory:
    - `App.jsx` — the project's own App component with internal sidebar nav, section routing, filter controls
    - `components/` — all section components (Overview, Sources, etc.)
    - `data/` — all data files as ES module exports
-5. **Update the project registry** at `<hubPath>/src/projects/index.js`:
+6. **Update the project registry** at `<personalHubPath>/src/projects/index.js`:
    - Add a lazy import: `'<slug>': lazy(() => import('./<slug>/App'))`
    - Add metadata entry to `projectRegistry` array (title, subtitle, slug, query, lens, icon, accentColor, createdAt)
-6. **Update config.json** — add the new project to the `projects` array with the same metadata + the original user query
-7. **Check dev server status:**
+7. **Update `hub-config.json`** — add the new project to the `projects` array with the same metadata + the original user query
+8. **Check dev server status:**
    - If Vite is already running on the hub port → tell user to refresh their browser (Vite HMR will pick up new files)
-   - If Vite is NOT running → start it: `cd <hubPath> && npm run dev`
-8. **Open browser preview** on the hub's port
+   - If Vite is NOT running → start it from `<personalHubPath>`: `npm run dev`
+9. **Open browser preview** on the hub's port
 
 ### Project File Structure (within the hub):
 
@@ -397,7 +455,7 @@ See [build-templates.md](references/build-templates.md) for data schemas, compon
 
 ### Important: Store the User's Original Query
 
-When updating `config.json` and `projects/index.js`, always store the user's original natural-language query in the `query` field. This is displayed in the hub's project cards and sidebar so the user remembers what each research was about.
+When updating `hub-config.json` and `projects/index.js`, always store the user's original natural-language query in the `query` field. This is displayed in the hub's project cards and sidebar so the user remembers what each research was about.
 
 ---
 
@@ -412,7 +470,7 @@ When updating `config.json` and `projects/index.js`, always store the user's ori
    - Summarize sections, note gaps, offer to deploy
 5. **Verify hub integration:** Confirm the new project appears in the hub sidebar and is navigable from the hub home page
 
-6. **Finalize telemetry:** Capture content analysis, hours-saved estimation, consumption time, and persist to config.json and projects/index.js. See [hub-architecture.md](references/hub-architecture.md#telemetry-schema) for all schemas, formulas, and capture timing.
+6. **Finalize telemetry:** Capture content analysis, hours-saved estimation, consumption time, and persist to `hub-config.json` and `projects/index.js`. See [hub-architecture.md](references/hub-architecture.md#telemetry-schema) for all schemas, formulas, and capture timing.
 
 7. **Git sync (personal):** If the hub directory is a git repo with a remote:
    - Stage all new/changed files: `git add -A`
@@ -420,12 +478,11 @@ When updating `config.json` and `projects/index.js`, always store the user's ori
    - Push to remote: `git push`
    - Inform the user: "Your new research has been committed and pushed to your Research Hub repo. It will be available on your other machines after a `git pull`."
    - If push fails (e.g., no remote configured), note it and suggest the user set up a remote later.
-   - Also update the local `config.json` with the `gitRepo` URL if not already set.
 
-8. **Library share (community):** If `config.json` has `library.enabled: true`:
-   - Use the **GitHub API** to push project files to `agent-contributions` (no git remotes or local library clone needed). Library slug = `<slug>-<gitUsername>` for collision avoidance.
+8. **Library share:** For each library in `hub-config.json` `libraries` array where `contributeEnabled` is true:
+   - Use the **GitHub API** to push project files to the library's `branch` (no git remotes or local library clone needed). Library slug = `<slug>-<gitUsername>` for collision avoidance.
    - Flow: get branch HEAD → create blobs for all project files + updated `index.js` → create tree → create commit → update ref. All calls use `Authorization: token <library.token>`.
-   - Inform the user: "Your research has been shared. A validation workflow will auto-merge it to main if it passes."
+   - Inform the user: "Your research has been shared with [library name]. A validation workflow will auto-merge it if it passes."
    - If 401/403: PAT may be invalid — suggest contacting the library maintainer.
    - See [hub-architecture.md](references/hub-architecture.md#agent-side-contribution-flow-phase-7-step-8) for the complete step-by-step API flow.
 

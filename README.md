@@ -77,7 +77,7 @@ Every research dashboard you create lives in a single **Research Hub** — one w
 
 ### How It Works
 
-- **First run**: The skill detects it's your first time, asks where to install the hub (default: `~/research-hub/`), scaffolds the app, and installs dependencies once.
+- **First run**: The skill detects it's your first time, asks where to install the hub (default: `~/git/personal-research-hub/`), scaffolds the app, and installs dependencies once.
 - **Every run after**: The skill finds your existing hub in under 2 seconds, builds the new research directly into it, and tells you to refresh your browser. That's it.
 
 ### The Experience
@@ -99,15 +99,17 @@ The hub isn't just a viewer — it's a launchpad. Since every project's data and
 - **Cross-reference** between projects ("How does the Cisco acquisition timeline compare to...")
 - **Extend analysis** with new dimensions you didn't think of initially
 
-The agent knows where everything lives because the hub's `config.json` tracks every project with its slug, path, original query, and research lens.
+The agent knows where everything lives because the hub's `hub-config.json` tracks every project with its slug, path, original query, and research lens.
 
-### Config & Detection
+### Config & Detection (Two-Layer)
 
 | File | Location | Purpose |
 |------|----------|--------|
-| `config.json` | `~/.codeium/windsurf/skills/research-visualizer/config.json` | Installation marker — stores hub path, port, and all project metadata |
-| `projects/index.js` | `<hubPath>/src/projects/index.js` | Runtime registry — lazy imports and metadata for the React app |
-| Project files | `<hubPath>/src/projects/<slug>/` | Each project's App.jsx, components/, and data/ |
+| `config.json` | `~/.codeium/windsurf/skills/research-visualizer/config.json` | Machine-local pointer — contains only `personalHubPath` |
+| `hub-config.json` | `<personalHubPath>/hub-config.json` | Portable config (git-synced) — port, libraries, projects, telemetry |
+| `.local-config.json` | `<personalHubPath>/.local-config.json` | Machine-local (gitignored) — library paths for Vite aliases |
+| `projects/index.js` | `<personalHubPath>/src/projects/index.js` | Runtime registry — lazy imports and metadata for the React app |
+| Project files | `<personalHubPath>/src/projects/<slug>/` | Each project's App.jsx, components/, and data/ |
 
 ### Project Telemetry
 
@@ -190,9 +192,9 @@ The skill prevents inconsistent output through:
 
 ```
 research-visualizer/
-├── SKILL.md                              # Core skill instructions (v5.0)
+├── SKILL.md                              # Core skill instructions (v6.0)
 ├── README.md                             # This file
-├── config.json                           # Hub installation config (created on first run)
+├── config.json                           # Machine-local pointer (personalHubPath only, created on first run)
 └── references/
     ├── hub-architecture.md               # Research Hub: config schema, directory structure, project registry
     ├── research-dimensions.md            # Standard Research Dimensions Framework
