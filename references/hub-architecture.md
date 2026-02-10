@@ -16,6 +16,17 @@ This file is the **installation detection marker**. If it exists, the hub has be
   "created": "2026-02-09T20:00:00Z",
   "hubPath": "/home/user/research-hub",
   "port": 5180,
+  "gitRepo": "git@github.com:user/their-hub.git",
+  "publicLibrary": {
+    "path": "/home/user/research-library"
+  },
+  "library": {
+    "enabled": true,
+    "remote": "https://github.com/mrshaun13/research-hub.git",
+    "branch": "agent-contributions",
+    "token": "<contributor PAT>",
+    "gitUsername": "jdoe"
+  },
   "projects": [
     {
       "slug": "espresso-machine-comparison",
@@ -40,6 +51,13 @@ This file is the **installation detection marker**. If it exists, the hub has be
 | `created` | ISO 8601 | When the hub was first set up |
 | `hubPath` | string | Absolute path to the hub directory |
 | `port` | number | Vite dev server port (default: 5180) |
+| `gitRepo` | string or null | Remote git URL for the user's personal hub repo. `null` if no remote configured. Set during Phase 0B. |
+| `publicLibrary.path` | string or null | Path to read-only public library clone. `null` if user declined. Set during Phase 0B-LIBRARY. See [Public Library Browse](#public-library-browse). |
+| `library.enabled` | boolean | Whether the user opted in to contributing. Once set, Phase 0C never asks again. |
+| `library.remote` | string | URL of the public library repo |
+| `library.branch` | string | Branch to push contributions to (always `agent-contributions`) |
+| `library.token` | string | Fine-grained PAT for pushing. Provided by maintainer during one-time setup. **Never commit to any repo.** |
+| `library.gitUsername` | string | From `git config user.name` — appended to slugs for collision avoidance. See [Community Library](#community-library). |
 | `projects` | array | All registered research projects |
 | `projects[].slug` | string | URL-safe directory name (kebab-case) |
 | `projects[].title` | string | Display title for sidebar and cards |
