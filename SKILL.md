@@ -12,7 +12,7 @@ license: MIT
 compatibility: Requires internet access for web search and data fetching.
 metadata:
   author: mrshaun13
-  version: "6.0"
+  version: "6.1"
 ---
 
 # Deep Research → Interactive Dashboard Pipeline
@@ -362,6 +362,9 @@ DATA SOURCES: [review sites, manufacturer sites, community sources]
 ```
 
 Ask: "Here's what I found and plan to build. Should I proceed, or adjust anything?"
+
+**Contribution intent:** If any library in `hub-config.json` has `contributeEnabled: true` AND `confirmEachShare: true`, also ask: *"Would you like to share this research with [library name] when it's done?"* Store the answer for Phase 7. If `confirmEachShare: false`, contribution intent is implicitly yes — do not ask.
+
 This is the ONLY required user interaction between the initial prompt and the final dashboard.
 
 ---
@@ -430,7 +433,7 @@ See [build-templates.md](references/build-templates.md) for data schemas, compon
 6. **Update the project registry** at `<personalHubPath>/src/projects/index.js`:
    - Add a lazy import: `'<slug>': lazy(() => import('./<slug>/App'))`
    - Add metadata entry to `projectRegistry` array (title, subtitle, slug, query, lens, icon, accentColor, createdAt)
-7. **Update `hub-config.json`** — add the new project to the `projects` array with the same metadata + the original user query
+7. **Update `hub-config.json`** — add the new project to the `projects` array with metadata + the original user query. **Do NOT include telemetry yet** — telemetry is computed and persisted in Phase 7 step 4.
 8. **Check dev server status:**
    - If Vite is already running on the hub port → tell user to refresh their browser (Vite HMR will pick up new files)
    - If Vite is NOT running → start it from `<personalHubPath>`: `npm run dev`
@@ -461,32 +464,25 @@ When updating `hub-config.json` and `projects/index.js`, always store the user's
 
 ## Phase 7: PRESENT — Polish, Validate, Deliver
 
+**Ordering is critical.** Steps 1-4 must complete before steps 5-8 begin. The hub is rendered ONCE at the end, after all syncs are done, so the user sees their research in both their personal space and the public library.
+
 1. **Build test:** Run `npx vite build` from the hub directory — must complete with zero errors
-2. **Visual QA:** Every chart renders, axis labels visible, tooltips correct, all filters work
-3. **Content QA:** Findings match data, citations complete, limitations documented, T4 estimates marked
-4. **Deliver to hub:**
-   - If dev server is already running → tell user: "Your new research is ready! Refresh your browser to see it in the Research Hub."
-   - If dev server is NOT running → start it from the hub directory (`npm run dev`) and open browser preview
-   - Summarize sections, note gaps, offer to deploy
-5. **Verify hub integration:** Confirm the new project appears in the hub sidebar and is navigable from the hub home page
+2. **QA:** Charts render, axis labels visible, tooltips correct, findings match data, citations complete, T4 estimates marked
+3. **Product QA:** See [product-comparison-template.md](references/product-comparison-template.md#phase-7-additions-product-qa) for product-specific checks.
 
-6. **Finalize telemetry:** Capture content analysis, hours-saved estimation, consumption time, and persist to `hub-config.json` and `projects/index.js`. See [hub-architecture.md](references/hub-architecture.md#telemetry-schema) for all schemas, formulas, and capture timing.
+4. **Finalize telemetry — GATE (steps 5-8 MUST NOT run until this is done):**
+   Compute ALL telemetry fields from [hub-architecture.md](references/hub-architecture.md#telemetry-schema) and persist to BOTH `hub-config.json` AND `projects/index.js`. This includes: `runStartedAt`, `runCompletedAt`, `durationMinutes`, `skillVersion`, `userPrompt`, `researchPlan`, `checkpointModified`, `searchesPerformed`, `sourcesCount`, `sectionsBuilt`, `chartsBuilt`, `filesGenerated`, `dataPointsCollected`, `phaseTiming` (all 8 phases), `contentAnalysis` (FK grade, Bloom's, word count), `hoursSaved` (using formulas from hub-architecture.md), and `consumptionTime`. Every field in the schema is required — do not skip any.
 
-7. **Git sync (personal):** If the hub directory is a git repo with a remote:
-   - Stage all new/changed files: `git add -A`
-   - Commit with a descriptive message: `git commit -m "Add <project-title> research project"`
-   - Push to remote: `git push`
-   - Inform the user: "Your new research has been committed and pushed to your Research Hub repo. It will be available on your other machines after a `git pull`."
-   - If push fails (e.g., no remote configured), note it and suggest the user set up a remote later.
+5. **Git sync (personal):** If the hub has a git remote: `git add -A` → `git commit` → `git push`. If push fails, note it.
 
-8. **Library share:** For each library in `hub-config.json` `libraries` array where `contributeEnabled` is true:
-   - Use the **GitHub API** to push project files to the library's `branch` (no git remotes or local library clone needed). Library slug = `<slug>-<gitUsername>` for collision avoidance.
-   - Flow: get branch HEAD → create blobs for all project files + updated `index.js` → create tree → create commit → update ref. All calls use `Authorization: token <library.token>`.
-   - Inform the user: "Your research has been shared with [library name]. A validation workflow will auto-merge it if it passes."
+6. **Library share:** For each library where contribution intent is yes (from Phase 3D):
+   - Push project files + updated `index.js` (with full telemetry) to the library's `branch` via the GitHub API. Library slug = `<slug>-<gitUsername>`.
+   - See [hub-architecture.md](references/hub-architecture.md#agent-side-contribution-flow-phase-7-step-8) for the complete API flow.
    - If 401/403: PAT may be invalid — suggest contacting the library maintainer.
-   - See [hub-architecture.md](references/hub-architecture.md#agent-side-contribution-flow-phase-7-step-8) for the complete step-by-step API flow.
 
-**Product/Purchase lens:** See [product-comparison-template.md](references/product-comparison-template.md#phase-7-additions-product-qa) for product-specific QA checks.
+7. **Library sync:** For each library just pushed to, pull the latest into the local library clone: `git -C <localPath> pull`. This ensures the hub shows the user's contribution in the library view.
+
+8. **Deliver to hub:** Start dev server if not running (`npm run dev`), or tell user to refresh. Open browser preview. The user should now see their research in their personal space AND in the public library. Summarize sections, note gaps.
 
 ---
 
