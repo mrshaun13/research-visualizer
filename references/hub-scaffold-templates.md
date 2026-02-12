@@ -5,11 +5,13 @@ These are the **exact files** the agent must produce when scaffolding a new Rese
 ## src/App.jsx
 
 The hub shell with:
-- **Two-section sidebar**: "Personal Research" (local projects) + "Shared Research" (public library, hidden when no library configured)
+- **Two-section sidebar**: "My Research" (all user projects: local + personal + public, with visibility dot indicators) + "Public Library" (other people's contributions, deduped)
 - **Independent search** per section
 - **Back navigation**: back button bar at top of main content + sidebar header click + direct project switching
+- **Dual registry import**: `./projects` (committed) + `./local-projects` (gitignored) — both fail gracefully if empty
 - **Public library import** via Vite alias `@public-library` — fails gracefully if not configured
 - **Community badge** on shared research projects when viewed
+- **Deduplication**: user's own public projects removed from Public Library section
 
 ```jsx
 import React, { useState, useEffect, Suspense } from 'react';
@@ -20,6 +22,17 @@ import {
 import { projectRegistry, projectComponents } from './projects';
 import HubHome from './components/HubHome';
 
+// Import local-only projects (gitignored) — fails gracefully if directory doesn't exist yet
+let localProjectRegistry = [];
+let localProjectComponents = {};
+try {
+  const localLib = await import('./local-projects');
+  localProjectRegistry = localLib.projectRegistry || [];
+  localProjectComponents = localLib.projectComponents || {};
+} catch (e) {
+  // No local-only projects yet — that's fine
+}
+
 // Import public library projects via Vite alias — resolves to the public library's src/projects
 let publicProjectRegistry = [];
 let publicProjectComponents = {};
@@ -28,8 +41,36 @@ try {
   publicProjectRegistry = publicLib.projectRegistry || [];
   publicProjectComponents = publicLib.projectComponents || {};
 } catch (e) {
-  // Public library not configured or not available — show local projects only
+  // Public library not configured or not available — show personal projects only
 }
+
+// Merge personal + local registries into one "all my projects" list
+const allMyProjects = [
+  ...projectRegistry.map(p => ({ ...p, visibility: p.visibility || 'personal' })),
+  ...localProjectRegistry.map(p => ({ ...p, visibility: 'local' })),
+];
+const allMyComponents = { ...projectComponents, ...localProjectComponents };
+
+// Read gitUsername from hub-config for dedup matching
+const hubConfigGitUsername = (() => {
+  try {
+    const libs = JSON.parse(document.querySelector('meta[name="hub-libraries"]')?.content || '[]');
+    return libs[0]?.gitUsername || null;
+  } catch { return null; }
+})();
+
+// Dedup: remove user's own projects from public library
+const dedupPublicProjects = publicProjectRegistry.filter(libProject => {
+  // Deterministic match: library slug ends with -<gitUsername>
+  if (hubConfigGitUsername) {
+    const suffix = `-${hubConfigGitUsername}`;
+    if (libProject.slug.endsWith(suffix)) return false; // it's ours, exclude
+  }
+  // Fuzzy fallback: exact match on title + createdAt
+  return !allMyProjects.some(
+    myP => myP.title === libProject.title && myP.createdAt === libProject.createdAt
+  );
+});
 
 const hasPublicLibrary = publicProjectRegistry.length > 0;
 
@@ -152,11 +193,11 @@ export default function App() {
   const [personalSearch, setPersonalSearch] = useState('');
   const [sharedSearch, setSharedSearch] = useState('');
 
-  const sortedProjects = [...projectRegistry].sort(
+  const sortedProjects = [...allMyProjects].sort(
     (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
   );
 
-  const sortedPublicProjects = [...publicProjectRegistry].sort(
+  const sortedPublicProjects = [...dedupPublicProjects].sort(
     (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
   );
 
@@ -172,15 +213,15 @@ export default function App() {
     setMobileMenuOpen(false);
   };
 
-  // Resolve the active component from either local or public library
+  // Resolve the active component from personal, local, or public library
   const ActiveProjectComponent = activeProject
     ? activeSource === 'library'
       ? publicProjectComponents[activeProject]
-      : projectComponents[activeProject]
+      : allMyComponents[activeProject]
     : null;
 
   const activeProjectMeta = activeProject
-    ? (activeSource === 'library' ? publicProjectRegistry : projectRegistry).find(p => p.slug === activeProject)
+    ? (activeSource === 'library' ? publicProjectRegistry : allMyProjects).find(p => p.slug === activeProject)
     : null;
 
   return (
@@ -220,7 +261,7 @@ export default function App() {
                   Research Hub
                 </h1>
                 <p className="text-[10px] text-gray-500 truncate">
-                  {projectRegistry.length} personal{hasPublicLibrary ? ` · ${publicProjectRegistry.length} shared` : ''}
+                  {allMyProjects.length} project{allMyProjects.length !== 1 ? 's' : ''}{hasPublicLibrary ? ` · ${dedupPublicProjects.length} shared` : ''}
                 </p>
               </div>
             </button>
@@ -236,24 +277,24 @@ export default function App() {
         {/* Scrollable sidebar content */}
         <div className="flex-1 overflow-y-auto">
 
-          {/* ── Personal Research Section ── */}
+          {/* ── My Research Section (all tiers: local + personal + public) ── */}
           {sidebarOpen && (
             <div className="px-4 pt-4 pb-1 flex-shrink-0">
               <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider flex items-center gap-1.5">
                 <Sparkles className="w-3 h-3" />
-                Personal Research
+                My Research
               </span>
             </div>
           )}
 
-          {/* Personal search */}
+          {/* My Research search */}
           {sidebarOpen && (
             <div className="px-3 pt-2 pb-1 flex-shrink-0">
               <div className="relative">
                 <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-500" />
                 <input
                   type="text"
-                  placeholder="Search personal..."
+                  placeholder="Search my research..."
                   value={personalSearch}
                   onChange={(e) => setPersonalSearch(e.target.value)}
                   className="w-full bg-gray-800/50 border border-gray-700/50 rounded-lg pl-8 pr-3 py-1.5 text-xs text-gray-300 placeholder-gray-500 focus:outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/20 transition-colors"
@@ -262,7 +303,7 @@ export default function App() {
             </div>
           )}
 
-          {/* Personal project list */}
+          {/* My Research project list */}
           <nav className="px-2 py-1">
             <SidebarProjectList
               projects={sortedProjects}
@@ -275,26 +316,26 @@ export default function App() {
             />
           </nav>
 
-          {/* ── Shared Research Section (only when public library exists) ── */}
-          {hasPublicLibrary && (
+          {/* ── Public Library Section (deduped — only other people's contributions) ── */}
+          {hasPublicLibrary && dedupPublicProjects.length > 0 && (
             <>
               {sidebarOpen && (
                 <div className="px-4 pt-4 pb-1 flex-shrink-0 border-t border-gray-800/50 mt-2">
                   <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider flex items-center gap-1.5">
                     <Library className="w-3 h-3" />
-                    Shared Research
+                    Public Library
                   </span>
                 </div>
               )}
 
-              {/* Shared search */}
+              {/* Library search */}
               {sidebarOpen && (
                 <div className="px-3 pt-2 pb-1 flex-shrink-0">
                   <div className="relative">
                     <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-500" />
                     <input
                       type="text"
-                      placeholder="Search shared..."
+                      placeholder="Search library..."
                       value={sharedSearch}
                       onChange={(e) => setSharedSearch(e.target.value)}
                       className="w-full bg-gray-800/50 border border-gray-700/50 rounded-lg pl-8 pr-3 py-1.5 text-xs text-gray-300 placeholder-gray-500 focus:outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/20 transition-colors"
@@ -303,7 +344,7 @@ export default function App() {
                 </div>
               )}
 
-              {/* Shared project list */}
+              {/* Library project list */}
               <nav className="px-2 py-1">
                 <SidebarProjectList
                   projects={sortedPublicProjects}
@@ -387,7 +428,7 @@ export default function App() {
         ) : (
           <HubHome
             projects={sortedProjects}
-            publicProjects={publicProjectRegistry}
+            publicProjects={dedupPublicProjects}
             onProjectClick={handleProjectClick}
             getAccent={getAccent}
             formatDate={formatDate}
@@ -402,14 +443,14 @@ export default function App() {
 
 ## src/components/HubHome.jsx
 
-Landing page with two browsable areas: "My Research" (personal project cards) and "Public Library" (community project cards with search). Shows aggregate telemetry stats, lens badges, community badges, hours-saved highlights, and readability/Bloom's metrics.
+Landing page with two browsable areas: "My Research" (all user project cards with visibility badges) and "Public Library" (deduped community project cards with search + "Include my research" toggle). Shows aggregate telemetry stats for both sections, lens badges, visibility badges, community badges, hours-saved highlights, and readability/Bloom's metrics.
 
 ```jsx
 import React, { useState } from 'react';
 import {
   FlaskConical, ArrowRight, Sparkles, Clock, Search, BarChart3,
   FileText, Database, Package, Timer, BookOpen, Zap, GraduationCap, Brain, Eye,
-  Library, Users,
+  Library, Users, HardDrive, GitBranch, Globe,
 } from 'lucide-react';
 
 const LENS_BADGES = {
@@ -506,7 +547,146 @@ function AggregateStats({ projects }) {
   );
 }
 
-function ProjectCard({ project, onProjectClick, getAccent, formatDate, ProjectIcon, source = 'local' }) {
+const VISIBILITY_CONFIG = {
+  local: { icon: HardDrive, label: 'Local', bg: 'bg-gray-800/50', text: 'text-gray-400', border: 'border-gray-700/50' },
+  personal: { icon: GitBranch, label: 'Synced', bg: 'bg-blue-500/10', text: 'text-blue-400', border: 'border-blue-500/20' },
+  public: { icon: Globe, label: 'Public', bg: 'bg-emerald-500/10', text: 'text-emerald-400', border: 'border-emerald-500/20' },
+};
+
+function VisibilityBadge({ visibility = 'personal' }) {
+  const config = VISIBILITY_CONFIG[visibility] || VISIBILITY_CONFIG.personal;
+  const Icon = config.icon;
+  return (
+    <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium border ${config.bg} ${config.text} ${config.border}`}
+      title={`Visibility: ${config.label}`}>
+      <Icon className="w-2.5 h-2.5" />
+      {config.label}
+    </span>
+  );
+}
+
+function VisibilitySelector({ slug, visibility = 'personal', onVisibilityChange }) {
+  const [showDropdown, setShowDropdown] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(null); // null or target visibility
+  const [loading, setLoading] = useState(false);
+
+  const tiers = ['local', 'personal', 'public'];
+  const currentIndex = tiers.indexOf(visibility);
+
+  const handleSelect = (newVis) => {
+    setShowDropdown(false);
+    if (newVis === visibility) return;
+
+    const newIndex = tiers.indexOf(newVis);
+    const isUpgrade = newIndex > currentIndex;
+    const isDowngradeToLocal = newVis === 'local' && visibility !== 'local';
+
+    if (isUpgrade || isDowngradeToLocal) {
+      setShowConfirm(newVis); // requires confirmation
+    } else {
+      applyChange(newVis); // downgrade public→personal is instant
+    }
+  };
+
+  const applyChange = async (newVis) => {
+    setLoading(true);
+    try {
+      const res = await fetch('/api/set-visibility', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ slug, visibility: newVis }),
+      });
+      if (res.ok) onVisibilityChange(slug, newVis);
+    } catch (err) {
+      console.error('Failed to change visibility:', err);
+    }
+    setLoading(false);
+    setShowConfirm(null);
+  };
+
+  const confirmMessages = {
+    personal: 'Sync this project to your personal repo? It will be available on all your machines.',
+    public: 'Make this project public? It will be synced to your repo and shared to configured libraries.',
+    local: 'Move this project to local-only? It will be removed from your personal repo on next sync. Files remain locally and in git history.',
+  };
+
+  return (
+    <>
+      <div className="relative">
+        <button
+          onClick={(e) => { e.stopPropagation(); setShowDropdown(!showDropdown); }}
+          disabled={loading}
+          className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium border transition-colors cursor-pointer ${
+            VISIBILITY_CONFIG[visibility]?.bg} ${VISIBILITY_CONFIG[visibility]?.text} ${VISIBILITY_CONFIG[visibility]?.border
+          } hover:opacity-80`}
+          title="Click to change visibility"
+        >
+          {React.createElement(VISIBILITY_CONFIG[visibility]?.icon || GitBranch, { className: 'w-2.5 h-2.5' })}
+          {VISIBILITY_CONFIG[visibility]?.label || 'Synced'}
+        </button>
+
+        {showDropdown && (
+          <div className="absolute top-full left-0 mt-1 z-30 bg-gray-900 border border-gray-700 rounded-lg shadow-xl py-1 min-w-[120px]"
+            onClick={(e) => e.stopPropagation()}>
+            {tiers.map((tier) => {
+              const cfg = VISIBILITY_CONFIG[tier];
+              const Icon = cfg.icon;
+              const isActive = tier === visibility;
+              return (
+                <button key={tier} onClick={() => handleSelect(tier)}
+                  className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs transition-colors ${
+                    isActive ? `${cfg.text} ${cfg.bg}` : 'text-gray-400 hover:text-white hover:bg-gray-800'
+                  }`}>
+                  <Icon className="w-3 h-3" />
+                  {cfg.label}
+                  {isActive && <span className="ml-auto text-[10px]">✓</span>}
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Confirmation dialog */}
+      {showConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={(e) => e.stopPropagation()}>
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowConfirm(null)} />
+          <div className="relative bg-gray-900 border border-gray-700 rounded-xl p-6 max-w-sm mx-4 shadow-2xl">
+            <div className="flex items-center gap-3 mb-4">
+              <div className={`w-10 h-10 rounded-lg ${VISIBILITY_CONFIG[showConfirm]?.bg} flex items-center justify-center`}>
+                {React.createElement(VISIBILITY_CONFIG[showConfirm]?.icon || GitBranch, {
+                  className: `w-5 h-5 ${VISIBILITY_CONFIG[showConfirm]?.text}`
+                })}
+              </div>
+              <h3 className="text-sm font-semibold text-white">
+                Change to {VISIBILITY_CONFIG[showConfirm]?.label}?
+              </h3>
+            </div>
+            <p className="text-xs text-gray-400 leading-relaxed mb-5">
+              {confirmMessages[showConfirm]}
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button onClick={() => setShowConfirm(null)}
+                className="px-3 py-1.5 text-xs text-gray-400 hover:text-white border border-gray-700 rounded-lg hover:border-gray-600 transition-colors">
+                Cancel
+              </button>
+              <button onClick={() => applyChange(showConfirm)} disabled={loading}
+                className={`px-3 py-1.5 text-xs text-white rounded-lg transition-colors disabled:opacity-50 ${
+                  showConfirm === 'local' ? 'bg-gray-600 hover:bg-gray-500' :
+                  showConfirm === 'public' ? 'bg-emerald-600 hover:bg-emerald-500' :
+                  'bg-blue-600 hover:bg-blue-500'
+                }`}>
+                {loading ? 'Changing...' : 'Confirm'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+function ProjectCard({ project, onProjectClick, getAccent, formatDate, ProjectIcon, source = 'local', onVisibilityChange }) {
   const accent = getAccent(project.accentColor);
   const t = project.telemetry;
   const isLibrary = source === 'library';
@@ -589,6 +769,9 @@ function ProjectCard({ project, onProjectClick, getAccent, formatDate, ProjectIc
         <div className="flex items-center gap-2">
           <LensBadge lens={project.lens} />
           {isLibrary && <CommunityBadge />}
+          {!isLibrary && onVisibilityChange && (
+            <VisibilitySelector slug={project.slug} visibility={project.visibility || 'personal'} onVisibilityChange={onVisibilityChange} />
+          )}
           <span className="text-[10px] text-gray-600">
             {formatDate(project.createdAt)}
           </span>
@@ -622,19 +805,37 @@ function ProjectCard({ project, onProjectClick, getAccent, formatDate, ProjectIc
 
 export default function HubHome({ projects, publicProjects = [], onProjectClick, getAccent, formatDate, ProjectIcon }) {
   const [librarySearch, setLibrarySearch] = useState('');
+  const [includeMyResearch, setIncludeMyResearch] = useState(false);
+  const [visibilityOverrides, setVisibilityOverrides] = useState({});
+
+  const handleVisibilityChange = (slug, newVisibility) => {
+    setVisibilityOverrides(prev => ({ ...prev, [slug]: newVisibility }));
+  };
+
+  // Merge live visibility overrides into project data
+  const projectsWithVisibility = projects.map(p => ({
+    ...p,
+    visibility: visibilityOverrides[p.slug] || p.visibility || 'personal',
+  }));
 
   const sortedPublicProjects = [...publicProjects].sort(
     (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
   );
 
+  // When "Include my research" is on, add user's public projects back into library results
+  const myPublicProjects = includeMyResearch
+    ? projectsWithVisibility.filter(p => p.visibility === 'public')
+    : [];
+  const libraryWithOptionalMine = [...sortedPublicProjects, ...myPublicProjects];
+
   const filteredPublicProjects = librarySearch
-    ? sortedPublicProjects.filter(
+    ? libraryWithOptionalMine.filter(
         p =>
           p.title.toLowerCase().includes(librarySearch.toLowerCase()) ||
           p.subtitle.toLowerCase().includes(librarySearch.toLowerCase()) ||
           (p.query && p.query.toLowerCase().includes(librarySearch.toLowerCase()))
       )
-    : sortedPublicProjects;
+    : libraryWithOptionalMine;
 
   return (
     <div className="min-h-full">
@@ -668,7 +869,7 @@ export default function HubHome({ projects, publicProjects = [], onProjectClick,
         {projects.length === 0 ? (
           <div className="text-center py-12 border border-dashed border-gray-800 rounded-xl">
             <FlaskConical className="w-10 h-10 text-gray-700 mx-auto mb-3" />
-            <h3 className="text-sm font-medium text-gray-400 mb-1">No personal research yet</h3>
+            <h3 className="text-sm font-medium text-gray-400 mb-1">No research yet</h3>
             <p className="text-xs text-gray-600 max-w-sm mx-auto">
               Start a new research project by asking your AI assistant to research any topic.
               It will appear here as an interactive dashboard.
@@ -676,7 +877,7 @@ export default function HubHome({ projects, publicProjects = [], onProjectClick,
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-            {projects.map((project) => (
+            {projectsWithVisibility.map((project) => (
               <ProjectCard
                 key={project.slug}
                 project={project}
@@ -685,6 +886,7 @@ export default function HubHome({ projects, publicProjects = [], onProjectClick,
                 formatDate={formatDate}
                 ProjectIcon={ProjectIcon}
                 source="local"
+                onVisibilityChange={handleVisibilityChange}
               />
             ))}
           </div>
@@ -692,31 +894,44 @@ export default function HubHome({ projects, publicProjects = [], onProjectClick,
       </div>
 
       {/* Public Library Section */}
-      {publicProjects.length > 0 && (
+      {(publicProjects.length > 0 || myPublicProjects.length > 0) && (
         <div className="max-w-6xl mx-auto px-6 py-8 border-t border-gray-800/50">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-semibold text-white flex items-center gap-2">
               <Library className="w-5 h-5 text-indigo-400" />
               Public Library
               <span className="text-xs font-normal text-gray-500 ml-1">
-                {publicProjects.length} community project{publicProjects.length !== 1 ? 's' : ''}
+                {sortedPublicProjects.length} community project{sortedPublicProjects.length !== 1 ? 's' : ''}
               </span>
             </h2>
-            <div className="relative w-56">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-500" />
-              <input
-                type="text"
-                placeholder="Search library..."
-                value={librarySearch}
-                onChange={(e) => setLibrarySearch(e.target.value)}
-                className="w-full bg-gray-800/50 border border-gray-700/50 rounded-lg pl-8 pr-3 py-1.5 text-xs text-gray-300 placeholder-gray-500 focus:outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/20 transition-colors"
-              />
+            <div className="flex items-center gap-3">
+              {/* Include my research toggle */}
+              <label className="flex items-center gap-1.5 cursor-pointer select-none" title="Include your own public projects in library results">
+                <input
+                  type="checkbox"
+                  checked={includeMyResearch}
+                  onChange={(e) => setIncludeMyResearch(e.target.checked)}
+                  className="w-3 h-3 rounded border-gray-600 bg-gray-800 text-indigo-500 focus:ring-indigo-500/20 focus:ring-offset-0"
+                />
+                <span className="text-[10px] text-gray-500">Include my research</span>
+              </label>
+              <div className="relative w-56">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-500" />
+                <input
+                  type="text"
+                  placeholder="Search library..."
+                  value={librarySearch}
+                  onChange={(e) => setLibrarySearch(e.target.value)}
+                  className="w-full bg-gray-800/50 border border-gray-700/50 rounded-lg pl-8 pr-3 py-1.5 text-xs text-gray-300 placeholder-gray-500 focus:outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/20 transition-colors"
+                />
+              </div>
             </div>
           </div>
-          <p className="text-xs text-gray-500 mb-5">
+          <p className="text-xs text-gray-500 mb-3">
             Community-contributed research dashboards. Browse and explore — read-only.
           </p>
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          <AggregateStats projects={sortedPublicProjects} />
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 mt-5">
             {filteredPublicProjects.map((project) => (
               <ProjectCard
                 key={`lib-${project.slug}`}
@@ -801,7 +1016,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync } from 'fs';
 
 // Read machine-local config for library paths (gitignored, created by skill during Phase 0)
 const localConfigPath = path.resolve(__dirname, '.local-config.json');
@@ -820,7 +1035,91 @@ if (localConfig.libraries) {
 }
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [
+    react(),
+    {
+      name: 'visibility-api',
+      configureServer(server) {
+        server.middlewares.use('/api/set-visibility', async (req, res) => {
+          if (req.method !== 'POST') {
+            res.statusCode = 405;
+            res.end(JSON.stringify({ error: 'Method not allowed' }));
+            return;
+          }
+          let body = '';
+          req.on('data', chunk => { body += chunk; });
+          req.on('end', () => {
+            const backup = {};
+            try {
+              const { slug, visibility } = JSON.parse(body);
+              if (!['local', 'personal', 'public'].includes(visibility)) {
+                res.statusCode = 400;
+                res.end(JSON.stringify({ error: 'Invalid visibility' }));
+                return;
+              }
+
+              const configPath = path.resolve(__dirname, 'hub-config.json');
+              const lcPath = path.resolve(__dirname, '.local-config.json');
+              const config = JSON.parse(readFileSync(configPath, 'utf-8'));
+              const lc = existsSync(lcPath)
+                ? JSON.parse(readFileSync(lcPath, 'utf-8'))
+                : { libraries: [] };
+              if (!lc.localProjects) lc.localProjects = [];
+
+              // Snapshot for rollback
+              backup.config = JSON.stringify(config, null, 2);
+              backup.lc = JSON.stringify(lc, null, 2);
+
+              const inMain = config.projects.find(p => p.slug === slug);
+              const inLocal = lc.localProjects.find(p => p.slug === slug);
+              const project = inMain || inLocal;
+              if (!project) {
+                res.statusCode = 404;
+                res.end(JSON.stringify({ error: 'Project not found' }));
+                return;
+              }
+
+              const currentVis = project.visibility || 'personal';
+              const movingToLocal = visibility === 'local' && currentVis !== 'local';
+              const movingFromLocal = visibility !== 'local' && currentVis === 'local';
+
+              const projectsDir = path.resolve(__dirname, 'src/projects', slug);
+              const localDir = path.resolve(__dirname, 'src/local-projects', slug);
+
+              if (movingToLocal && existsSync(projectsDir)) {
+                mkdirSync(path.resolve(__dirname, 'src/local-projects'), { recursive: true });
+                renameSync(projectsDir, localDir);
+                config.projects = config.projects.filter(p => p.slug !== slug);
+                project.visibility = 'local';
+                lc.localProjects.push(project);
+              } else if (movingFromLocal && existsSync(localDir)) {
+                renameSync(localDir, projectsDir);
+                lc.localProjects = lc.localProjects.filter(p => p.slug !== slug);
+                project.visibility = visibility;
+                config.projects.push(project);
+              } else {
+                project.visibility = visibility;
+              }
+
+              writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n');
+              writeFileSync(lcPath, JSON.stringify(lc, null, 2) + '\n');
+
+              res.setHeader('Content-Type', 'application/json');
+              res.end(JSON.stringify({ ok: true, slug, visibility, moved: movingToLocal || movingFromLocal }));
+            } catch (e) {
+              // Rollback on failure
+              try {
+                if (backup.config) writeFileSync(path.resolve(__dirname, 'hub-config.json'), backup.config + '\n');
+                if (backup.lc) writeFileSync(path.resolve(__dirname, '.local-config.json'), backup.lc + '\n');
+              } catch (_) {}
+              res.statusCode = 500;
+              res.end(JSON.stringify({ error: e.message }));
+            }
+          });
+        });
+      },
+    },
+  ],
   build: {
     target: 'esnext',
   },
@@ -901,6 +1200,19 @@ dist/
 .DS_Store
 *.local
 .local-config.json
+src/local-projects/
+```
+
+### src/local-projects/index.js
+
+**Note:** This file is gitignored. It is auto-generated by the agent during Phase 6 when the first local-only project is created. Same format as `src/projects/index.js`. If no local projects exist yet, this file and directory may not exist — `App.jsx` handles this gracefully.
+
+```js
+import { lazy } from 'react';
+
+export const projectRegistry = [];
+
+export const projectComponents = {};
 ```
 
 ### package.json

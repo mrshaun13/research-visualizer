@@ -12,7 +12,7 @@ license: MIT
 compatibility: Requires internet access for web search and data fetching.
 metadata:
   author: mrshaun13
-  version: "6.1"
+  version: "6.3"
 ---
 
 # Deep Research → Interactive Dashboard Pipeline
@@ -363,7 +363,13 @@ DATA SOURCES: [review sites, manufacturer sites, community sources]
 
 Ask: "Here's what I found and plan to build. Should I proceed, or adjust anything?"
 
-**Contribution intent:** If any library in `hub-config.json` has `contributeEnabled: true` AND `confirmEachShare: true`, also ask: *"Would you like to share this research with [library name] when it's done?"* Store the answer for Phase 7. If `confirmEachShare: false`, contribution intent is implicitly yes — do not ask.
+**Visibility notice (inform only — do not ask):** After presenting the research plan, inform the user of the default visibility:
+- If `hub-config.json` has a valid `gitRepo`: *"This project will be **personal** by default (synced to your repo). You can change visibility from the hub UI or ask me later."*
+- If `hub-config.json` has NO `gitRepo`: *"This project will be **local** by default (this machine only). You can change visibility from the hub UI or ask me later."*
+
+See [Visibility Tiers](references/hub-architecture.md#visibility-tiers).
+
+**Contribution intent:** If any library in `hub-config.json` has `contributeEnabled: true` AND `confirmEachShare: true`, also ask: *"Would you like to share this research with [library name] when it's done? (This will make the project public.)"* If the user says yes, set `visibility: "public"` when creating the project in Phase 6. If `confirmEachShare: false`, the project uses the smart default visibility.
 
 This is the ONLY required user interaction between the initial prompt and the final dashboard.
 
@@ -425,15 +431,20 @@ See [build-templates.md](references/build-templates.md) for data schemas, compon
 1. **Read pointer config** (`~/.codeium/windsurf/skills/research-visualizer/config.json`) to get `personalHubPath`
 2. **Read `hub-config.json`** from `<personalHubPath>/hub-config.json` for port and project list
 3. **Generate a slug** for the new project (kebab-case from topic, e.g., "cisco-history-dashboard")
-4. **Create project directory:** `<personalHubPath>/src/projects/<slug>/`
+4. **Create project directory** based on visibility:
+   - `"personal"` or `"public"`: `<personalHubPath>/src/projects/<slug>/`
+   - `"local"`: `<personalHubPath>/src/local-projects/<slug>/` (create `src/local-projects/` if it doesn't exist)
 5. **Write project files** into that directory:
    - `App.jsx` — the project's own App component with internal sidebar nav, section routing, filter controls
    - `components/` — all section components (Overview, Sources, etc.)
    - `data/` — all data files as ES module exports
-6. **Update the project registry** at `<personalHubPath>/src/projects/index.js`:
-   - Add a lazy import: `'<slug>': lazy(() => import('./<slug>/App'))`
-   - Add metadata entry to `projectRegistry` array (title, subtitle, slug, query, lens, icon, accentColor, createdAt)
-7. **Update `hub-config.json`** — add the new project to the `projects` array with metadata + the original user query. **Do NOT include telemetry yet** — telemetry is computed and persisted in Phase 7 step 4.
+6. **Update the project registry** based on visibility:
+   - `"personal"` or `"public"`: Update `<personalHubPath>/src/projects/index.js` — add lazy import + metadata entry
+   - `"local"`: Update `<personalHubPath>/src/local-projects/index.js` — add lazy import + metadata entry (create the file if it doesn't exist, using the same format as `src/projects/index.js`)
+7. **Update config** based on visibility:
+   - `"personal"` or `"public"`: Add the project to `hub-config.json` `projects` array with metadata + original user query + `visibility` field
+   - `"local"`: Add the project to `.local-config.json` `localProjects` array with the same schema + `visibility: "local"`
+   - **Do NOT include telemetry yet** — telemetry is computed and persisted in Phase 7 step 4. See [Visibility Tiers](references/hub-architecture.md#visibility-tiers).
 8. **Check dev server status:**
    - If Vite is already running on the hub port → tell user to refresh their browser (Vite HMR will pick up new files)
    - If Vite is NOT running → start it from `<personalHubPath>`: `npm run dev`
@@ -475,7 +486,7 @@ When updating `hub-config.json` and `projects/index.js`, always store the user's
 
 5. **Git sync (personal):** If the hub has a git remote: `git add -A` → `git commit` → `git push`. If push fails, note it.
 
-6. **Library share:** For each library where contribution intent is yes (from Phase 3D):
+6. **Library share (gated by visibility):** Only share if the project's `visibility` is `"public"`. If `visibility` is `"personal"` or `"local"` (or missing — treated as `"personal"`), **skip sharing entirely**. For public projects, proceed for each library where contribution intent is yes (from Phase 3D):
    - Push project files + updated `index.js` (with full telemetry) to the library's `branch` via the GitHub API. Library slug = `<slug>-<gitUsername>`.
    - See [hub-architecture.md](references/hub-architecture.md#agent-side-contribution-flow-phase-7-step-8) for the complete API flow.
    - If 401/403: PAT may be invalid — suggest contacting the library maintainer.
@@ -488,4 +499,4 @@ When updating `hub-config.json` and `projects/index.js`, always store the user's
 
 ## Edge Cases & Troubleshooting
 
-See [hub-architecture.md](references/hub-architecture.md#edge-cases--troubleshooting) for the full troubleshooting table covering research, product lens, hub, git, and library edge cases.
+See [hub-architecture.md](references/hub-architecture.md#edge-cases--troubleshooting) for the full troubleshooting table covering research, product lens, hub, git, library, and visibility edge cases.

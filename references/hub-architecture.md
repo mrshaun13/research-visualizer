@@ -56,6 +56,7 @@ Contains everything else: port, gitRepo, libraries, projects, telemetry. Committ
       "lens": "product",
       "icon": "Coffee",
       "accentColor": "amber",
+      "visibility": "personal",
       "createdAt": "2026-02-09T12:00:00Z",
       "updatedAt": "2026-02-09T14:00:00Z"
     }
@@ -82,6 +83,7 @@ Contains everything else: port, gitRepo, libraries, projects, telemetry. Committ
 | `projects[].accentColor` | string | Tailwind color name for project theming (e.g., "cyan", "orange") |
 | `projects[].createdAt` | ISO 8601 | When the project was first created |
 | `projects[].updatedAt` | ISO 8601 | Last modification time |
+| `projects[].visibility` | string | Project visibility tier: `"local"`, `"personal"` (default), or `"public"`. Controls where files live and how they sync. See [Visibility Tiers](#visibility-tiers). Note: local projects are stored in `.local-config.json` instead, not here. |
 | `projects[].telemetry` | object | Run telemetry and project statistics (see Telemetry Schema below) |
 
 ### Libraries Array
@@ -383,6 +385,7 @@ export const projectRegistry = [
     lens: 'standard',
     icon: 'Building2',
     accentColor: 'cyan',
+    visibility: 'personal',
     createdAt: '2026-02-08T12:00:00Z',
   },
   {
@@ -393,6 +396,7 @@ export const projectRegistry = [
     lens: 'product',
     icon: 'Coffee',
     accentColor: 'amber',
+    visibility: 'public',
     createdAt: '2026-02-09T12:00:00Z',
   },
 ];
@@ -404,9 +408,11 @@ export const projectComponents = {
 ```
 
 **When adding a new project**, the skill:
-1. Creates the project directory under `src/projects/<slug>/`
-2. Adds an import line and registry entry to `src/projects/index.js`
-3. Adds the project to `hub-config.json`
+1. Creates the project directory under `src/projects/<slug>/` (personal/public) or `src/local-projects/<slug>/` (local)
+2. Adds an import line and registry entry to the corresponding `index.js`
+3. Adds the project to `hub-config.json` (personal/public) or `.local-config.json` `localProjects` array (local)
+
+See [Visibility Tiers](#visibility-tiers) for the full decision logic.
 
 ## Hub App Shell Design
 
@@ -414,17 +420,27 @@ The hub uses a **ChatGPT-style layout** with optional public library integration
 
 ### Sidebar (collapsible)
 - **Header**: "Research Hub" branding with a collapse toggle
-- **My Research** section: Each project shows icon + title + date, sorted newest-first
+- **My Research** section: Lists ALL user projects (local + personal + public) with small visibility dot indicators, sorted newest-first. Independent search bar.
+- **Public Library** section: Lists only OTHER people's contributions (deduped — the user's own public projects are excluded here). Independent search bar. Only visible when at least one library has `browseEnabled: true` and has projects.
 - **Active indicator**: Highlighted item for currently viewed project
-- **Home / Library button** (far left/top): Returns to the hub landing page which includes the public library browser if configured
+- **Home / Library button** (far left/top): Returns to the hub landing page
 - Sidebar collapses to icon-only mode; expands on hover or click
-- Sidebar search filters **local projects only**
 
 ### Main Content Area
 - **Home view** (no project selected): Two areas:
-  - **My Research**: Grid of local project cards (title, subtitle, lens badge, date, accent color border)
-  - **Libraries** (if any library has `browseEnabled: true`): Grid of community project cards, badged as "Community", showing contributor username. Separate search bar for filtering library projects.
+  - **My Research**: Grid of ALL user project cards (local + personal + public) with visibility badges (`HardDrive`/Local gray, `GitBranch`/Synced blue, `Globe`/Public emerald). Includes `AggregateStats` for user's projects.
+  - **Public Library** (if any library has `browseEnabled: true`): Grid of community project cards (deduped — user's own public projects excluded). Shows contributor username, "Community" badge. Separate search bar with **"Include my research"** toggle (default: off). Includes `AggregateStats` for library projects.
 - **Project view** (project selected): Renders the project's App component full-width. Public library projects render read-only with a "Community" banner.
+
+### Deduplication Logic
+
+When the user has a project that also exists in the public library, it should appear **only once** in "My Research" with the `Globe` badge — not duplicated in the "Public Library" section.
+
+**Match logic (hybrid):**
+1. **Deterministic (preferred):** Library slugs use `<slug>-<gitUsername>`. If the current user's `gitUsername` (from `hub-config.json` libraries config) matches the suffix → it's their project.
+2. **Fuzzy fallback (for users without a GitHub account):** Contributors who share via a maintainer's PAT won't have their own gitUsername in the library slug. Fall back to matching on `title` + `createdAt` (exact match on both — same title AND same creation timestamp is extremely unlikely to be coincidence).
+
+For other users: no match on either method → the project appears normally in their "Public Library" section.
 
 ### Responsive
 - On mobile: sidebar is a slide-out drawer with overlay
@@ -461,7 +477,8 @@ The Research Hub is designed to be backed by a git repo, allowing research to be
 
 | Item | In Git Repo | Why |
 |---|---|---|
-| `src/projects/` (all project dirs + index.js) | ✅ | All research data, components, and registry |
+| `src/projects/` (personal + public project dirs + index.js) | ✅ | Synced research data, components, and registry |
+| `src/local-projects/` (local-only project dirs + index.js) | ❌ | **Local-only** — gitignored, never committed |
 | `src/App.jsx`, `src/components/`, `src/main.jsx`, `src/index.css` | ✅ | Hub shell — needed to run |
 | `package.json`, `package-lock.json` | ✅ | Dependency definitions |
 | `vite.config.js`, `tailwind.config.js`, `postcss.config.js`, `index.html` | ✅ | Build/run config |
@@ -502,6 +519,7 @@ dist/
 .DS_Store
 *.local
 .local-config.json
+src/local-projects/
 ```
 
 ## Public Library Browse
@@ -806,6 +824,191 @@ The skill will:
 2. Push them to `agent-contributions` via the GitHub API (same flow as Phase 7 step 8)
 3. Confirm to the user: "Shared! The validation workflow will run automatically."
 
+## Visibility Tiers
+
+Every research project has a **visibility** tier that controls where its files live, whether it syncs to the user's personal git repo, and whether it's shared to public libraries.
+
+### The Three Tiers
+
+| Tier | `visibility` | Files location | Config location | Personal git sync | Library sharing |
+|---|---|---|---|---|---|
+| **Local** | `"local"` | `src/local-projects/<slug>/` (gitignored) | `.local-config.json` (gitignored) | Never | No — sharing upgrades to public first |
+| **Personal** | `"personal"` | `src/projects/<slug>/` | `hub-config.json` (committed) | Yes — committed + pushed | No — sharing upgrades to public first |
+| **Public** | `"public"` | `src/projects/<slug>/` | `hub-config.json` (committed) | Yes — committed + pushed | Yes — auto-shared per library settings |
+
+### Smart Default
+
+- If `hub-config.json` has a valid `gitRepo` → default = **`"personal"`**
+- If `hub-config.json` has NO `gitRepo` (empty/missing) → default = **`"local"`** (nowhere to sync)
+
+### Sharing Upgrades Visibility — No Mixed States
+
+There is no "local + published" state. If a user shares a local or personal project to a library, the project is **upgraded to public** first (local files move from `src/local-projects/` to `src/projects/`, metadata moves to `hub-config.json`). Sharing always means the project becomes public. This keeps the model clean: visibility = where files live, and public = synced + shared.
+
+### Schema
+
+**Personal and public projects** — stored in `hub-config.json` and mirrored in `src/projects/index.js`:
+
+```json
+{
+  "slug": "career-pivot-explorer",
+  "title": "Career Pivot Explorer",
+  "visibility": "personal",
+  ...
+}
+```
+
+**Local projects** — stored in `.local-config.json` `localProjects` array and mirrored in `src/local-projects/index.js`:
+
+```json
+{
+  "localProjects": [
+    {
+      "slug": "secret-salary-research",
+      "title": "Secret Salary Research",
+      "subtitle": "Confidential Compensation Analysis",
+      "query": "Research salary ranges for...",
+      "lens": "standard",
+      "icon": "Lock",
+      "accentColor": "gray",
+      "visibility": "local",
+      "createdAt": "2026-02-11T12:00:00Z",
+      "telemetry": { ... }
+    }
+  ]
+}
+```
+
+### Behavior by Phase
+
+| Phase | Behavior |
+|---|---|
+| **Phase 3D (checkpoint)** | After the research plan, **inform only** (don't ask): *"This project will be **[personal/local]** by default."* Default is based on `gitRepo` presence. User can change visibility later from the hub UI or by asking the agent. |
+| **Phase 6 (BUILD)** | Write files to `src/projects/` (personal/public) or `src/local-projects/` (local). Update the correct registry and config. Set `visibility` field. |
+| **Phase 7 step 5 (personal git sync)** | `git add -A` is safe — `src/local-projects/` is gitignored. Only personal + public projects get committed. |
+| **Phase 7 step 6 (library share)** | Auto-share only if `visibility === "public"`. For personal/local: skip. |
+| **Ad-hoc sharing** | "Share my X with the library" → if project is local or personal, **upgrade to public first** (move files if needed, update config), then share. Confirm with user: *"This will make the project public (synced + shared). Proceed?"* |
+
+### Hub UI
+
+The visibility tier is shown on every project card and controllable from the hub:
+
+**Visibility badges (on project cards in HubHome.jsx):**
+
+| Badge | Icon | Color | Meaning |
+|---|---|---|---|
+| **Local** | `HardDrive` | gray | This machine only |
+| **Synced** | `GitBranch` | blue | Synced to personal repo |
+| **Public** | `Globe` | emerald | Synced + shared to public library |
+
+**VisibilitySelector (dropdown on each card):**
+- Clicking the badge opens a small dropdown to change the tier
+- **Upgrading** (local→personal, personal→public) requires a confirmation dialog
+- **Downgrading** (public→personal) is instant (safe direction)
+- **personal→local** warns: *"This project will be removed from your personal repo on next sync. Files remain locally and in git history."*
+
+**Confirmation dialog (upgrade only):**
+- Triggered when upgrading visibility
+- For local→personal: "Sync this project to your personal repo? It will be available on all your machines."
+- For personal→public or local→public: "Make this project public? It will be synced to your repo and shared to configured libraries."
+- Two buttons: "Cancel" and "Confirm"
+- Styled as a modal overlay with backdrop blur, consistent with hub dark theme
+
+### Vite Server Middleware for Visibility Changes
+
+Replace the old `/api/toggle-lock` with `/api/set-visibility`:
+
+```js
+{
+  name: 'visibility-api',
+  configureServer(server) {
+    server.middlewares.use('/api/set-visibility', async (req, res) => {
+      if (req.method !== 'POST') {
+        res.statusCode = 405;
+        res.end(JSON.stringify({ error: 'Method not allowed' }));
+        return;
+      }
+      let body = '';
+      req.on('data', chunk => { body += chunk; });
+      req.on('end', () => {
+        const backup = {};
+        try {
+          const { slug, visibility } = JSON.parse(body);
+          if (!['local', 'personal', 'public'].includes(visibility)) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: 'Invalid visibility' }));
+            return;
+          }
+
+          const configPath = path.resolve(__dirname, 'hub-config.json');
+          const localConfigPath = path.resolve(__dirname, '.local-config.json');
+          const config = JSON.parse(readFileSync(configPath, 'utf-8'));
+          const localConfig = existsSync(localConfigPath)
+            ? JSON.parse(readFileSync(localConfigPath, 'utf-8'))
+            : { libraries: [] };
+          if (!localConfig.localProjects) localConfig.localProjects = [];
+
+          // Snapshot for rollback
+          backup.config = JSON.stringify(config, null, 2);
+          backup.localConfig = JSON.stringify(localConfig, null, 2);
+
+          const inMain = config.projects.find(p => p.slug === slug);
+          const inLocal = localConfig.localProjects.find(p => p.slug === slug);
+          const project = inMain || inLocal;
+          if (!project) {
+            res.statusCode = 404;
+            res.end(JSON.stringify({ error: 'Project not found' }));
+            return;
+          }
+
+          const currentVis = project.visibility || 'personal';
+          const movingToLocal = visibility === 'local' && currentVis !== 'local';
+          const movingFromLocal = visibility !== 'local' && currentVis === 'local';
+
+          // Move files between directories if crossing the local boundary
+          const projectsDir = path.resolve(__dirname, 'src/projects', slug);
+          const localDir = path.resolve(__dirname, 'src/local-projects', slug);
+
+          if (movingToLocal && existsSync(projectsDir)) {
+            mkdirSync(path.resolve(__dirname, 'src/local-projects'), { recursive: true });
+            renameSync(projectsDir, localDir);
+            // Move metadata: hub-config → .local-config
+            config.projects = config.projects.filter(p => p.slug !== slug);
+            project.visibility = 'local';
+            localConfig.localProjects.push(project);
+          } else if (movingFromLocal && existsSync(localDir)) {
+            renameSync(localDir, projectsDir);
+            // Move metadata: .local-config → hub-config
+            localConfig.localProjects = localConfig.localProjects.filter(p => p.slug !== slug);
+            project.visibility = visibility;
+            config.projects.push(project);
+          } else {
+            // Same directory — just update the field
+            project.visibility = visibility;
+          }
+
+          writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n');
+          writeFileSync(localConfigPath, JSON.stringify(localConfig, null, 2) + '\n');
+
+          res.setHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify({ ok: true, slug, visibility, moved: movingToLocal || movingFromLocal }));
+        } catch (e) {
+          // Rollback on failure
+          try {
+            if (backup.config) writeFileSync(path.resolve(__dirname, 'hub-config.json'), backup.config + '\n');
+            if (backup.localConfig) writeFileSync(path.resolve(__dirname, '.local-config.json'), backup.localConfig + '\n');
+          } catch (_) {}
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: e.message }));
+        }
+      });
+    });
+  },
+}
+```
+
+**Note:** This middleware runs during `npm run dev` (Vite dev server). It reads/writes both `hub-config.json` and `.local-config.json`. The imports `writeFileSync`, `mkdirSync`, `renameSync`, and `existsSync` must all be imported from `'fs'` in `vite.config.js`. When files are moved between directories, the agent should regenerate both `index.js` registries on next invocation (or the user can restart the dev server).
+
 ## Port Management
 
 The hub always runs on a fixed port (default: 5180) configured in:
@@ -848,3 +1051,10 @@ This avoids port conflicts from multiple dev servers. Only ONE server ever runs.
 | Library: slug collision in the library | Slugs are suffixed with `gitUsername` (e.g., `chainsaw-comparison-jdoe`) — collisions should not occur |
 | Library: validation workflow fails after push | A GitHub Issue is created automatically with failure details. Fix the issues in the local project and re-push. |
 | Library: project already exists in library index.js | When reading the current index.js (step 3 of contribution flow), check if the slug already exists. If so, update the existing entry rather than adding a duplicate. |
+| Visibility: user asks to share a local/personal project | Upgrade to public first: "This will make the project public (synced + shared). Proceed?" Require explicit "yes" before upgrading and sharing. |
+| Visibility: user downgrades personal→local | Warn: "This project will be removed from your personal repo on next sync. Files remain locally and in git history." Move files to `src/local-projects/`, move metadata to `.local-config.json`. |
+| Visibility: existing projects missing `visibility` field | Treat missing `visibility` as `"personal"` (safe default). The agent should backfill the field when it next reads `hub-config.json`. |
+| Visibility: no `gitRepo` configured | All new projects default to `"local"`. User can still share to libraries (upgrades to public, but personal git sync won't work without a repo). |
+| Visibility: set-visibility API fails | Show error toast in hub UI. Visibility is not changed (rollback). User can retry or ask the agent to change it manually. |
+| Visibility: `src/local-projects/` directory doesn't exist yet | Create it on first local project (middleware uses `mkdirSync` with `recursive: true`). Hub App.jsx gracefully handles missing directory. |
+| Dedup: user's project appears in both My Research and Public Library | Dedup logic removes it from Public Library. If dedup fails (no gitUsername match, no title+createdAt match), show in both — better to duplicate than to hide. |
