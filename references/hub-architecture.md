@@ -194,6 +194,16 @@ Every project tracks telemetry about its creation and the research run that prod
 | `phaseTiming.analyze` | number | | Minutes spent in Phase 5 |
 | `phaseTiming.build` | number | | Minutes spent in Phase 6 |
 | `phaseTiming.present` | number | | Minutes spent in Phase 7 |
+| `dataQualityDistribution` | object | optional | Aggregated count of data points by quality tier |
+| `dataQualityDistribution.t1` | number | | Count of T1 (Gold) data points — peer-reviewed, large sample |
+| `dataQualityDistribution.t2` | number | | Count of T2 (Silver) data points — institutional/industry reports |
+| `dataQualityDistribution.t3` | number | | Count of T3 (Bronze) data points — small studies, single source |
+| `dataQualityDistribution.t4` | number | | Count of T4 (Estimate) data points — interpolated, proxy-based |
+| `sourceDiversityScore` | number | optional | Ratio of unique source domains to total sources (0–1). Higher = more diverse sourcing. |
+| `promptComplexity` | object | optional | Analysis of the user's original prompt |
+| `promptComplexity.wordCount` | number | | Word count of the user prompt |
+| `promptComplexity.entityCount` | number | | Count of named entities (brands, places, people, products) in the prompt |
+| `promptComplexity.ambiguityScore` | number | | 0–1 score where 0 = highly specific, 1 = very open-ended |
 
 ### Content Analysis (Readability & Cognitive Depth)
 

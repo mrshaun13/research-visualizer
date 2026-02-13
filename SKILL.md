@@ -12,7 +12,7 @@ license: MIT
 compatibility: Requires internet access for web search and data fetching.
 metadata:
   author: mrshaun13
-  version: "6.3"
+  version: "6.4"
 ---
 
 # Deep Research → Interactive Dashboard Pipeline
@@ -482,7 +482,7 @@ When updating `hub-config.json` and `projects/index.js`, always store the user's
 3. **Product QA:** See [product-comparison-template.md](references/product-comparison-template.md#phase-7-additions-product-qa) for product-specific checks.
 
 4. **Finalize telemetry — GATE (steps 5-8 MUST NOT run until this is done):**
-   Compute ALL telemetry fields from [hub-architecture.md](references/hub-architecture.md#telemetry-schema) and persist to BOTH `hub-config.json` AND `projects/index.js`. This includes: `runStartedAt`, `runCompletedAt`, `durationMinutes`, `skillVersion`, `userPrompt`, `researchPlan`, `checkpointModified`, `searchesPerformed`, `sourcesCount`, `sectionsBuilt`, `chartsBuilt`, `filesGenerated`, `dataPointsCollected`, `phaseTiming` (all 8 phases), `contentAnalysis` (FK grade, Bloom's, word count), `hoursSaved` (using formulas from hub-architecture.md), and `consumptionTime`. Every field in the schema is required — do not skip any.
+   Compute ALL telemetry fields from [hub-architecture.md](references/hub-architecture.md#telemetry-schema) and persist to BOTH `hub-config.json` AND `projects/index.js`. This includes: `runStartedAt`, `runCompletedAt`, `durationMinutes`, `skillVersion`, `userPrompt`, `researchPlan`, `checkpointModified`, `searchesPerformed`, `sourcesCount`, `sectionsBuilt`, `chartsBuilt`, `filesGenerated`, `dataPointsCollected`, `phaseTiming` (all 8 phases), `contentAnalysis` (FK grade, Bloom's, word count), `hoursSaved` (using formulas from hub-architecture.md), `consumptionTime`, and optional quality fields: `dataQualityDistribution` (T1-T4 counts), `sourceDiversityScore`, `promptComplexity`. Every field in the schema is required — do not skip any.
 
 5. **Git sync (personal):** If the hub has a git remote: `git add -A` → `git commit` → `git push`. If push fails, note it.
 
