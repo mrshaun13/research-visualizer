@@ -73,6 +73,47 @@ Use `null` for missing data (never 0 for missing).
 1. **CustomTooltip** — dark themed, shows all payload values
 2. **Heatmap** — interactive, color-scaled, hover detail panel
 3. **InsightCallout** — colored box with key finding text
+4. **GlossaryTerm** — inline term with dotted underline, click-to-open flyout with definition + research prompt
+
+### GlossaryTerm Component
+
+Renders an inline term with a subtle dotted underline. On click, opens a flyout card with a plain-language definition and a copy-paste research prompt.
+
+**Props:**
+- `term` (string) — the glossary key to look up in `glossaryTerms` data
+- `children` (ReactNode) — the inline display text (usually the term itself)
+- `accentColor` (string, optional) — Tailwind color name, defaults to project accent
+
+**Flyout card contents:**
+- Term name (bold)
+- Definition (1-2 sentences, plain language)
+- "Research this →" button — copies `researchPrompt` to clipboard, shows "Copied!" for 2s
+
+**Styling:**
+- Idle: `border-b border-dotted` at 40% accent opacity, `cursor-pointer`
+- Hover: solid underline, subtle background highlight (`bg-{accent}-500/10`)
+- Flyout: `absolute z-50`, dark card (`bg-gray-800 border border-gray-700 rounded-lg shadow-xl`), max-width 320px, `p-4`
+- Auto-position: flip above term if flyout would overflow viewport bottom
+- Dismiss: click outside (use `useEffect` with document click listener), Escape key, or click another term
+
+**Data file (`data/glossaryTerms.js`):**
+```javascript
+export const glossaryTerms = {
+  "TERM": {
+    definition: "Plain-language explanation in 1-2 sentences.",
+    researchPrompt: "Research [topic]: [expanded framing for a rich dashboard]"
+  }
+};
+```
+
+**Usage in section components:**
+```jsx
+import { GlossaryTerm } from './GlossaryTerm';
+import { glossaryTerms } from '../data/glossaryTerms';
+
+// In JSX:
+<p>The platform provides an <GlossaryTerm term="SDK">SDK</GlossaryTerm> for developers.</p>
+```
 
 ## App Layout Pattern
 

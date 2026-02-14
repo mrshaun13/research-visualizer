@@ -12,7 +12,7 @@ license: MIT
 compatibility: Requires internet access for web search and data fetching.
 metadata:
   author: mrshaun13
-  version: "7.0"
+  version: "7.1"
 ---
 
 # Deep Research → Interactive Dashboard Pipeline
@@ -29,10 +29,10 @@ Takes a simple research topic from a user, autonomously discovers dimensions, me
 ## Pipeline
 
 ```
-ENVIRONMENT CHECK → INTERPRET → SURVEY → DISCOVER → RESEARCH → ANALYZE → BUILD → PRESENT
-       ↓                ↓                               ↓
-  Hub exists?       Extension?                   User Checkpoint
-    ↓ no               ↓ yes
+ENVIRONMENT CHECK → INTERPRET → SURVEY → DISCOVER → RESEARCH → ANALYZE → BUILD → ENRICH → PRESENT
+       ↓                ↓                               ↓                          ↓
+  Hub exists?       Extension?                   User Checkpoint          Key Term Glossary
+    ↓ no               ↓ yes                                               (always on)
   FIRST-TIME SETUP  Extension Phase 1B
                       (inject: classify, scope, configure)
 ```
@@ -440,6 +440,67 @@ When the active extension has `output_mode: template`, Phase 6 produces a JSON d
 ### Important: Store the User's Original Query
 
 When updating `hub-config.json` and `projects/index.js`, always store the user's original natural-language query in the `query` field. This is displayed in the hub's project cards and sidebar so the user remembers what each research was about.
+
+---
+
+## Phase 6B: ENRICH — Key Term Glossary (Post-Build)
+
+After the dashboard is built, scan all user-facing text content (section titles, subtitles, insight callouts, chart labels, overview paragraphs) and identify domain-specific, technical, or tribal terms that a general audience would not immediately understand. Wrap each identified term in a `<GlossaryTerm>` component that provides an inline definition flyout and a ready-to-use research prompt.
+
+This step runs automatically on every project. It adds minimal build time and significantly improves content accessibility.
+
+### Density Rules
+
+| Rule | Value | Rationale |
+|---|---|---|
+| **Minimum per project** | 3 terms | Ensures the feature always adds value |
+| **Maximum per section** | 2 terms | Prevents tooltip fatigue within a single view |
+| **Maximum per project** | 8 terms | Keeps the dashboard clean, not cluttered |
+| **No stacking** | Never two terms in the same sentence | Pick the more obscure one if both qualify |
+
+### Term Selection Criteria
+
+Identify terms using this priority order (highest first):
+
+1. **Acronyms & initialisms** — SDK, API, CAGR, TCO, HVAC, OEM (unless already expanded inline)
+2. **Domain jargon** — terms specific to the research field that a non-specialist wouldn't know (e.g., "loss aversion", "herd immunity", "basis points")
+3. **Technical concepts** — methodological or scientific terms used in findings (e.g., "confidence interval", "regression to the mean")
+4. **Tribal knowledge** — industry-insider terms that assume context (e.g., "greenfield", "dogfooding", "technical debt")
+
+**Skip:** Common words a high-school graduate would know, terms already defined in the surrounding text, proper nouns (brand names, people), and units of measurement.
+
+### Steps
+
+1. **Scan all text content** in the built project — overview paragraphs, insight callout text, section subtitles, chart axis labels, and any prose in data files.
+2. **Identify candidate terms** using the selection criteria above. Rank by obscurity (how likely a general reader is to not know the term).
+3. **Apply density rules** — select the top-ranked terms within the floor/ceiling bounds. Distribute across sections (prefer at least 1 term in the first section the user sees).
+4. **Generate for each selected term:**
+   - **Definition** (1-2 sentences): Plain-language explanation. No jargon in the definition itself.
+   - **Research prompt**: A complete, copy-paste-ready prompt for the research-visualizer skill to launch a new research project on that term/concept. Format: *"Research [term]: [expanded topic framing that would produce a rich dashboard]"*
+5. **Create `glossaryTerms.js`** in the project's `data/` directory:
+   ```javascript
+   export const glossaryTerms = {
+     "SDK": {
+       definition: "Software Development Kit — a collection of tools, libraries, and documentation that developers use as a starting point to build applications for a specific platform or service.",
+       researchPrompt: "Research software development kits: how SDKs have evolved from early platform toolkits to modern cloud-native frameworks, their impact on developer productivity, adoption patterns across industries, and how open-source vs proprietary SDKs shape technology ecosystems"
+     },
+     // ... more terms
+   };
+   ```
+6. **Add `GlossaryTerm.jsx`** to the project's `components/` directory. See [build-templates.md](references/build-templates.md#glossaryterm-component) for the component specification.
+7. **Wrap identified terms** in existing section components with `<GlossaryTerm term="SDK">SDK</GlossaryTerm>`. Import `glossaryTerms` data and the component in each section file that contains glossed terms.
+
+### GlossaryTerm UX
+
+- **Idle state:** Subtle dotted underline (not solid — distinguishes from hyperlinks). Uses the project's accent color at 40% opacity.
+- **Hover state:** Underline becomes solid, slight background highlight.
+- **Click/tap:** Opens a compact flyout card anchored below the term:
+  - **Term** in bold at top
+  - **Definition** (1-2 sentences) in normal text
+  - **"Research this →"** button at bottom — clicking copies the research prompt to clipboard and shows a brief "Copied!" confirmation
+- **Dismiss:** Click outside the flyout, press Escape, or click another glossary term.
+- **Mobile:** Flyout becomes a bottom sheet on small screens.
+- **Positioning:** Flyout auto-positions to stay within viewport (flip above if near bottom edge).
 
 ---
 
