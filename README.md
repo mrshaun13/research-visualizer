@@ -19,10 +19,10 @@ This skill flips that. You give it a topic in plain English. It figures out the 
 ## How It Works
 
 ```
-ENVIRONMENT CHECK → INTERPRET → SURVEY → DISCOVER → RESEARCH → ANALYZE → BUILD → PRESENT
-       ↓                ↓                               ↓
-  Hub exists?       Extension?                   User Checkpoint
-    ↓ no               ↓ yes                    (lightweight approval)
+ENVIRONMENT CHECK → INTERPRET → SURVEY → DISCOVER → RESEARCH → ANALYZE → BUILD → ENRICH → PRESENT
+       ↓                ↓                               ↓                          ↓
+  Hub exists?       Extension?                   User Checkpoint          Key Term Glossary
+    ↓ no               ↓ yes                    (lightweight approval)     (on by default)
   FIRST-TIME SETUP  Extension Phase 1B
                       (inject: classify, scope, configure)
 ```
@@ -37,6 +37,7 @@ ENVIRONMENT CHECK → INTERPRET → SURVEY → DISCOVER → RESEARCH → ANALYZE
 | **RESEARCH** | Deep data gathering with source triangulation and quality tiers | None |
 | **ANALYZE** | Identifies key findings, auto-selects chart types from data shape | None |
 | **BUILD** | Builds project into the Research Hub — no new servers, no new installs | None |
+| **ENRICH** | Scans content for domain/technical terms, adds inline glossary flyouts with definitions and research prompts | None |
 | **PRESENT** | QA, build test, refresh browser or start hub server | Review |
 
 ## Example
@@ -153,7 +154,8 @@ Every research project automatically captures telemetry about its creation — n
 - **Original prompt** — the exact text you typed to trigger the skill
 - **Research plan** — the full checkpoint text you approved before the build
 - **Checkpoint modified** — whether you requested changes at the checkpoint
-- **Phase timing breakdown** — per-phase duration (environment, interpret, survey, discover, research, analyze, build, present)
+- **Phase timing breakdown** — per-phase duration (environment, interpret, survey, discover, research, analyze, build, enrich, present)
+- **Glossary metrics** — whether enrichment ran, terms identified vs rendered, breakdown by category (acronym, domain jargon, technical concept, tribal knowledge)
 - **Data points collected** — approximate count of individual data values gathered
 - **Files generated** — total files written to the project directory
 - **Token usage** — approximate tokens consumed (when available from runtime)
@@ -191,6 +193,18 @@ Extensions hook into pipeline phases with three strategies: **augment** (add alo
 - **Incident Review Analyzer** (template) — analyzes service incidents from ServiceNow/Splunk/PCC into structured review dashboards
 - **Sprint Analyzer** (template) — generates sprint analysis reports from Jira data
 
+### Key Term Glossary (Phase 6B: ENRICH)
+
+After every dashboard is built, the agent automatically scans all text content and identifies domain-specific, technical, or tribal terms that a general audience might not understand. Each identified term gets:
+
+- **Inline dotted underline** — subtle, doesn't clutter the dashboard
+- **Click flyout** — compact card with a plain-language definition (1-2 sentences)
+- **"Research this →" button** — copies a fully-formed research prompt to clipboard, ready to paste and launch a new research project on that concept
+
+**Density guardrails** keep it clean: minimum 3 terms per project, maximum 2 per section, maximum 8 per project, never two in the same sentence. Terms are ranked by obscurity (acronyms → domain jargon → technical concepts → tribal knowledge).
+
+**On by default.** To disable, set `"glossaryEnrichment": false` in `hub-config.json`. Telemetry tracks terms identified, terms rendered, and category breakdown for every project.
+
 ### Data-Driven Visualization
 Chart types are selected AFTER data collection based on data shape — not prescribed by the user beforehand. The same data shape always produces the same chart type (deterministic, not random).
 
@@ -214,7 +228,7 @@ The skill prevents inconsistent output through:
 
 ```
 research-visualizer/
-├── SKILL.md                              # Core pipeline instructions (v7.0)
+├── SKILL.md                              # Core pipeline instructions (v7.1)
 ├── README.md                             # This file
 ├── config.json                           # Machine-local pointer (personalHubPath only, created on first run)
 ├── extensions/                           # Pluggable specializations

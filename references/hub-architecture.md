@@ -33,6 +33,7 @@ Contains everything else: port, gitRepo, libraries, projects, telemetry. Committ
   "version": "3.0",
   "created": "2026-02-10T21:00:00Z",
   "port": 5180,
+  "glossaryEnrichment": true,
   "gitRepo": "git@github.com:user/personal-research-hub.git",
   "libraries": [
     {
@@ -82,6 +83,7 @@ Contains everything else: port, gitRepo, libraries, projects, telemetry. Committ
 | `version` | string | Config schema version (current: "3.0") |
 | `created` | ISO 8601 | When the hub was first set up |
 | `port` | number | Vite dev server port (default: 5180) |
+| `glossaryEnrichment` | boolean | Enable/disable Key Term Glossary enrichment (default: `true`). When enabled, Phase 6B scans dashboard text for domain/technical terms and wraps them in inline definition flyouts with research prompts. |
 | `gitRepo` | string or null | Remote git URL for the user's personal hub repo. `null` if no remote configured. |
 | `libraries` | array | Configured shared research libraries (can be empty). See [Libraries](#libraries-array). |
 | `projects` | array | All registered research projects |
@@ -180,7 +182,19 @@ Every project tracks telemetry about its creation and the research run that prod
     "research": 45,
     "analyze": 10,
     "build": 40,
+    "enrich": 3,
     "present": 13
+  },
+  "glossary": {
+    "enabled": true,
+    "termsIdentified": 6,
+    "termsRendered": 6,
+    "termsByCategory": {
+      "acronym": 2,
+      "domainJargon": 2,
+      "technicalConcept": 1,
+      "tribalKnowledge": 1
+    }
   }
 }
 ```
@@ -214,7 +228,17 @@ Every project tracks telemetry about its creation and the research run that prod
 | `phaseTiming.research` | number | | Minutes spent in Phase 4 |
 | `phaseTiming.analyze` | number | | Minutes spent in Phase 5 |
 | `phaseTiming.build` | number | | Minutes spent in Phase 6 |
+| `phaseTiming.enrich` | number | | Minutes spent in Phase 6B |
 | `phaseTiming.present` | number | | Minutes spent in Phase 7 |
+| `glossary` | object | ✓ | Key Term Glossary enrichment metrics |
+| `glossary.enabled` | boolean | | Whether the glossary enrichment ran for this project |
+| `glossary.termsIdentified` | number | | Total candidate terms found before density filtering |
+| `glossary.termsRendered` | number | | Final terms wrapped in GlossaryTerm components (after floor/ceiling rules) |
+| `glossary.termsByCategory` | object | | Breakdown of rendered terms by selection category |
+| `glossary.termsByCategory.acronym` | number | | Acronyms & initialisms |
+| `glossary.termsByCategory.domainJargon` | number | | Domain-specific jargon |
+| `glossary.termsByCategory.technicalConcept` | number | | Methodological/scientific terms |
+| `glossary.termsByCategory.tribalKnowledge` | number | | Industry-insider terms |
 | `dataQualityDistribution` | object | optional | Aggregated count of data points by quality tier |
 | `dataQualityDistribution.t1` | number | | Count of T1 (Gold) data points — peer-reviewed, large sample |
 | `dataQualityDistribution.t2` | number | | Count of T2 (Silver) data points — institutional/industry reports |
@@ -357,7 +381,8 @@ estimatedMinutes = readingMinutes + chartExplorationMinutes + interactiveOverhea
 | `sectionsBuilt`, `chartsBuilt`, `filesGenerated` | Phase 6 — count after build completes |
 | `productsCompared` | Phase 6 — count products array length (Product lens) |
 | `dataPointsCollected` | Phase 4 — count data points gathered |
-| `phaseTiming.*` | Each phase — note start/end timestamps, calculate delta |
+| `phaseTiming.*` | Each phase (including 6B enrich) — note start/end timestamps, calculate delta |
+| `glossary.*` | Phase 6B — capture after enrichment completes: enabled flag, terms identified vs rendered, category breakdown |
 | `contentAnalysis.*` | Phase 7 — analyze all text in built components |
 | `hoursSaved.*` | Phase 7 — calculate from build metrics using formulas above |
 | `consumptionTime.*` | Phase 7 — calculate from word count + chart count + FK grade |
@@ -714,6 +739,8 @@ This avoids port conflicts from multiple dev servers. Only ONE server ever runs.
 | Hub: project slug already exists in registry | Ask user: overwrite existing project or choose a new name? |
 | Hub: npm install fails in hub directory | Check node/npm versions, clear node_modules and retry, check for lockfile conflicts |
 | Hub: new project doesn't appear after refresh | Verify projects/index.js was updated correctly, check for import errors in browser console |
+| Glossary: fewer than 3 terms found in a project | The content is highly accessible — still create the glossaryTerms.js with whatever was found (even 0). Log in telemetry as `termsIdentified: N, termsRendered: N`. The floor is a target, not a hard requirement. |
+| Glossary: user wants to disable enrichment | Set `glossaryEnrichment: false` in `hub-config.json`. Phase 6B will be skipped entirely. Telemetry records `glossary.enabled: false`. |
 | Git: push fails with authentication error | Verify SSH keys or HTTPS credentials are configured for the remote |
 | Git: pull has merge conflicts | Conflicts likely in `src/projects/index.js` — resolve by keeping both project entries, then re-commit |
 | Git: pointer config has wrong personalHubPath after clone | Pointer config is machine-local (not in repo) — just update the `personalHubPath` field to match the local clone path |

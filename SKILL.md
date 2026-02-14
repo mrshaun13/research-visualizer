@@ -447,7 +447,7 @@ When updating `hub-config.json` and `projects/index.js`, always store the user's
 
 After the dashboard is built, scan all user-facing text content (section titles, subtitles, insight callouts, chart labels, overview paragraphs) and identify domain-specific, technical, or tribal terms that a general audience would not immediately understand. Wrap each identified term in a `<GlossaryTerm>` component that provides an inline definition flyout and a ready-to-use research prompt.
 
-This step runs automatically on every project. It adds minimal build time and significantly improves content accessibility.
+This step is **enabled by default** (`glossaryEnrichment: true` in `hub-config.json`). If the user sets `glossaryEnrichment: false`, skip this phase entirely and record `glossary.enabled: false` in telemetry.
 
 ### Density Rules
 
@@ -513,7 +513,7 @@ Identify terms using this priority order (highest first):
 3. **Extension QA:** If an extension is active, load its Phase 7 instructions for domain-specific QA checks.
 
 4. **Finalize telemetry — GATE (steps 5-8 MUST NOT run until this is done):**
-   Compute ALL telemetry fields from [hub-architecture.md](references/hub-architecture.md#telemetry-schema) and persist to the project's `meta.json` file at `<hubPath>/src/projects/<slug>/meta.json` (or `src/local-projects/<slug>/meta.json` for local projects). This includes: `runStartedAt`, `runCompletedAt`, `durationMinutes`, `skillVersion`, `userPrompt`, `researchPlan`, `checkpointModified`, `searchesPerformed`, `sourcesCount`, `sectionsBuilt`, `chartsBuilt`, `filesGenerated`, `dataPointsCollected`, `phaseTiming` (all 8 phases), `contentAnalysis` (FK grade, Bloom's, word count), `hoursSaved` (using formulas from hub-architecture.md), `consumptionTime`, and optional quality fields: `dataQualityDistribution` (T1-T4 counts), `sourceDiversityScore`, `promptComplexity`. Every field in the schema is required — do not skip any.
+   Compute ALL telemetry fields from [hub-architecture.md](references/hub-architecture.md#telemetry-schema) and persist to the project's `meta.json` file at `<hubPath>/src/projects/<slug>/meta.json` (or `src/local-projects/<slug>/meta.json` for local projects). This includes: `runStartedAt`, `runCompletedAt`, `durationMinutes`, `skillVersion`, `userPrompt`, `researchPlan`, `checkpointModified`, `searchesPerformed`, `sourcesCount`, `sectionsBuilt`, `chartsBuilt`, `filesGenerated`, `dataPointsCollected`, `phaseTiming` (all 9 phases including `enrich`), `glossary` (enabled, termsIdentified, termsRendered, termsByCategory), `contentAnalysis` (FK grade, Bloom's, word count), `hoursSaved` (using formulas from hub-architecture.md), `consumptionTime`, and optional quality fields: `dataQualityDistribution` (T1-T4 counts), `sourceDiversityScore`, `promptComplexity`. Every field in the schema is required — do not skip any.
    
    **Important:** Telemetry lives ONLY in `meta.json` — NOT in `hub-config.json` or `projects/index.js`. Those files contain only lightweight metadata. The hub lazy-loads telemetry from `meta.json` on demand.
    
