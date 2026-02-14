@@ -2,6 +2,11 @@
 
 These are the **exact files** the agent must produce when scaffolding a new Research Hub during Phase 0B-SCAFFOLD. Copy them verbatim, adjusting only the values marked with `<placeholder>`.
 
+**Key architecture notes:**
+- **Lightweight registries:** `projects/index.js` contains only metadata (slug, title, subtitle, query, lens, icon, accentColor, visibility, createdAt). Telemetry lives in per-project `meta.json` files and is lazy-loaded by HubHome on demand.
+- **Collections:** Template-mode extensions produce collections under `src/collections/<ext-slug>/`. The hub renders these as collapsible sidebar groups and table views. See [collections-architecture.md](collections-architecture.md).
+- **Graceful degradation:** All optional features (local projects, public library, collections) fail gracefully when not configured.
+
 ## src/App.jsx
 
 The hub shell with:
@@ -444,6 +449,8 @@ export default function App() {
 ## src/components/HubHome.jsx
 
 Landing page with two browsable areas: "My Research" (all user project cards with visibility badges) and "Public Library" (deduped community project cards with search + "Include my research" toggle). Shows aggregate telemetry stats for both sections, lens badges, visibility badges, community badges, hours-saved highlights, and readability/Bloom's metrics.
+
+**Telemetry lazy-loading:** Project cards fetch telemetry from `meta.json` on demand (not from the registry). The registry contains only lightweight metadata. HubHome uses `useEffect` to load `meta.json` for visible project cards and caches the results. This keeps the initial page load fast even with 100+ projects.
 
 ```jsx
 import React, { useState } from 'react';
@@ -959,6 +966,9 @@ export default function HubHome({ projects, publicProjects = [], onProjectClick,
 ## Other Scaffold Files (unchanged — copy verbatim)
 
 ### src/projects/index.js
+
+**Note:** Registry entries contain ONLY lightweight metadata (slug, title, subtitle, query, lens, icon, accentColor, visibility, createdAt). Telemetry lives in per-project `meta.json` files, NOT in this registry. The hub lazy-loads telemetry on demand.
+
 ```js
 import { lazy } from 'react';
 

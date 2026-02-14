@@ -4,22 +4,22 @@ description: >
   Deep research on any topic and build an interactive statistical visualization dashboard.
   Use when the user asks to research a topic, visualize data, create a research dashboard,
   explore trends, compare populations, or analyze statistics across time periods or groups.
-  Includes a Product/Purchase specialization that auto-detects when a user wants to compare
-  products or make a buying decision, and scaffolds a comprehensive product comparison dashboard
-  with specs, pricing, recommendations, purchase links, and data-driven analysis.
+  Supports a pluggable extension system with two output modes: bespoke (unique React dashboards)
+  and template (shared component + JSON data for high-volume structured reports).
+  Extensions auto-detect from user prompts and augment the pipeline with specialized logic.
   Handles the full pipeline from research discovery through interactive React dashboard delivery.
 license: MIT
 compatibility: Requires internet access for web search and data fetching.
 metadata:
   author: mrshaun13
-  version: "6.4"
+  version: "7.0"
 ---
 
 # Deep Research → Interactive Dashboard Pipeline
 
 Takes a simple research topic from a user, autonomously discovers dimensions, metrics, subgroups, and taxonomies, then produces an interactive web dashboard.
 
-**Specialization: Product Comparison** — When the user's intent is to compare products or make a purchase decision, the skill auto-detects this and activates a deeper product-specific template with standardized sections for specs, pricing, cost analysis, recommendations, purchase links, and more. See [product-comparison-template.md](references/product-comparison-template.md).
+**Extension System** — Specialized workflows (product comparisons, incident reviews, sprint analyses) are handled by pluggable extensions that auto-detect from user prompts and augment the pipeline with domain-specific logic. Extensions support two output modes: **bespoke** (unique React dashboards) and **template** (shared component + JSON data for high-volume structured reports). See [extensions/registry.md](extensions/registry.md).
 
 ## Design Philosophy
 
@@ -31,10 +31,10 @@ Takes a simple research topic from a user, autonomously discovers dimensions, me
 ```
 ENVIRONMENT CHECK → INTERPRET → SURVEY → DISCOVER → RESEARCH → ANALYZE → BUILD → PRESENT
        ↓                ↓                               ↓
-  Hub exists?       Product lens?                User Checkpoint
+  Hub exists?       Extension?                   User Checkpoint
     ↓ no               ↓ yes
-  FIRST-TIME SETUP  PRODUCT CLASSIFY
-                      (lifecycle, flags, user profile)
+  FIRST-TIME SETUP  Extension Phase 1B
+                      (inject: classify, scope, configure)
 ```
 
 ---
@@ -117,7 +117,7 @@ This runs ONCE per machine. The goal is to either clone an existing personal hub
 2. **Scaffold the hub app** — copy every file verbatim from [hub-scaffold-templates.md](references/hub-scaffold-templates.md). The `vite.config.js` template reads from `.local-config.json` dynamically (no hardcoded paths).
 3. **Run `npm install`**
 4. **Initialize git repo:** `git init`, `git branch -m main`, `.gitignore` (node_modules/, dist/, .DS_Store, *.local, .local-config.json). Ask about connecting a remote — if provided, push; if skipped, local only.
-5. **Create `hub-config.json`** in the hub directory — set `version: "2.0"`, `port: 5180`, `gitRepo` (or null), empty `libraries` array, empty `projects` array.
+5. **Create `hub-config.json`** in the hub directory — set `version: "3.0"`, `port: 5180`, `gitRepo` (or null), empty `libraries` array, empty `projects` array, empty `collections` array.
 6. **Create pointer config** at `~/.codeium/windsurf/skills/research-visualizer/config.json`:
    ```json
    { "personalHubPath": "<chosen-path>" }
@@ -190,9 +190,8 @@ Parse natural language into research parameters. No structured input required.
 - "Research the rise and fall of shopping malls in the US"
 - "Compare remote work vs office work outcomes since COVID"
 - "How has commercial aviation safety improved over time?"
-- "I'm looking to buy a boat for weekend fishing" *(triggers Product/Purchase lens)*
-- "Help me pick a good laptop for software development" *(triggers Product/Purchase lens)*
-- "What's the best SUV for a family of 5?" *(triggers Product/Purchase lens)*
+- "I'm looking to buy a boat for weekend fishing" *(triggers product-purchase extension)*
+- "Analyze the last 5 incidents for my team" *(triggers incident-review extension, if installed)*
 
 ### Steps:
 
@@ -209,49 +208,20 @@ Parse natural language into research parameters. No structured input required.
    - **Behavior lens** → prevalence, taxonomy, outcomes
    - **Industry lens** → market size, revenue, worker conditions
    - **Culture lens** → societal shifts over time, media, public opinion
-   - **Product/Purchase lens** → product specs, pricing, brand comparison, value analysis, purchase recommendations
-   - Most topics combine 2-3 lenses. The Product/Purchase lens is special — when detected, it activates Phase 1B and overrides much of the standard pipeline with product-specific scaffolding.
+   - Most topics combine 2-3 lenses.
 
-**Product/Purchase lens detection signals:**
-- Explicit: "buy", "purchase", "looking for", "which should I get", "help me choose", "best [product] for"
-- Implicit: mentions of brands, models, price ranges, product categories, "compare [products]"
-- Context: any request where the end goal is selecting a product to acquire
+### Extension Detection
 
-**Output:** Topic, populations, time scope, intent, lenses. If Product/Purchase lens is detected, proceed to Phase 1B. Otherwise, proceed directly to Phase 2.
+After extracting the core research parameters, scan the user's prompt against all installed extension triggers from [extensions/registry.md](extensions/registry.md).
 
----
+For each extension, check:
+- **Explicit triggers** — direct keyword matches in the user's prompt
+- **Implicit triggers** — indirect signals (mentions of related concepts)
+- **Context** — overall intent alignment
 
-## Phase 1B: PRODUCT CLASSIFY *(Product/Purchase lens only)*
+If an extension matches, load its `EXTENSION.md` for phase-specific instructions. The extension may inject a Phase 1B (classification/scoping step) before Phase 2.
 
-When the Product/Purchase lens is detected, classify the product BEFORE surveying. This classification drives which sections get built and how deep the analysis goes.
-
-See [product-comparison-template.md](references/product-comparison-template.md) for the complete classification framework.
-
-### Steps:
-
-1. **Classify lifecycle tier:**
-   - **Durable / Investment** (5+ years): vehicles, pro tools, appliances, HVAC, furniture, instruments
-   - **Semi-Durable** (1–5 years): phones, laptops, cameras, mid-range tools, gaming consoles
-   - **Consumable / Short-Life** (<1 year): compact tools, accessories, cables, budget items
-
-2. **Set product characteristic flags:**
-   - **Ecosystem Dependency** — requires batteries, subscriptions, or proprietary accessories?
-   - **Multi-Use-Case** — serves 3+ distinct scenarios?
-   - **High Feature Density** — 6+ boolean features differentiate products?
-   - **Clear Market Tiers** — products span obvious quality/price tiers?
-   - **Derived Metric Opportunity** — two specs combine into a meaningful ratio?
-   - **Existing User Ecosystem** — user already owns compatible batteries/tools/platform?
-
-3. **Extract user profile** (from prompt or reasonable inference):
-   - Budget range, use intensity, experience level, key constraints, primary use case
-   - If the user provides minimal info, assume the most common buyer profile and state assumptions in the Overview. The user can correct at the checkpoint.
-
-4. **Pre-select dashboard sections** using the Section Selection Decision Tree in [product-comparison-template.md](references/product-comparison-template.md):
-   - Universal sections (always): Overview, Spec Comparison, Recommendations, Sources
-   - Conditional sections (based on flags): Cost Analysis/TCO, Features Matrix, Use Case Fit, Ecosystem Comparison, metric deep-dives
-   - Target: 5–8 sections total
-
-**Output:** Lifecycle tier, flags, user profile, pre-selected sections. Proceed to Phase 2.
+**Output:** Topic, populations, time scope, intent, lenses, active extension (if any). If an extension with Phase 1B is active, run its injected phase next. Otherwise, proceed directly to Phase 2.
 
 ---
 
@@ -284,9 +254,9 @@ Understand the research landscape before diving deep.
    
    **Guiding principle:** The best segmentation is the one where the data looks *different* on either side of the boundary. If a timeline split doesn't reveal a meaningful change, it's the wrong split.
 
-**Product/Purchase lens:** See [product-comparison-template.md](references/product-comparison-template.md#phase-2-additions-product-survey) for product-specific search patterns and segmentation.
+**Extension hook (augment):** If an extension is active, load its Phase 2 instructions for additional search patterns and segmentation strategies specific to the extension's domain.
 
-**Output:** Major data sources, preliminary dimensions, temporal segmentation (or product segmentation for Product lens). Proceed to Phase 3.
+**Output:** Major data sources, preliminary dimensions, temporal segmentation. Proceed to Phase 3.
 
 ---
 
@@ -320,17 +290,7 @@ For each dimension with categorical subtypes:
 
 See [subgroup-discovery.md](references/subgroup-discovery.md) for search templates.
 
-### 3C-P: Product-Specific Discovery *(Product/Purchase lens only)*
-
-When the Product/Purchase lens is active, replace or augment 3A-3C with product-specific discovery. The key steps:
-
-1. **Discover product tiers/categories** — research how the market actually segments this product type (don't assume tiers)
-2. **Discover 5-8 key differentiating specs** and **1-2 derived metrics** (ratios that combine specs into value insights)
-3. **Discover brands**, use cases, ecosystem constraints, and price/value breakpoints
-4. **Build product shortlist** — 8-20 products across the full price range (popular choices + hidden gems, 3+ brands, all tiers)
-5. **Gather per-product data** — manufacturer specs, street prices with purchase URLs, review aggregates, expert reviews, community sentiment
-
-See [product-comparison-template.md](references/product-comparison-template.md#phase-3-product-discovery) for the full 9-step discovery process with examples for each product category.
+**Extension hook (override):** If an extension is active, it may replace or augment 3A-3C with domain-specific discovery. Load the extension's Phase 3 instructions.
 
 ### 3D: User Checkpoint
 
@@ -347,19 +307,7 @@ PROPOSED SECTIONS: [~5-8 sections]
 KEY DATA SOURCES: [major studies]
 ```
 
-**Product comparison checkpoint:**
-```
-PRODUCT TYPE: [interpreted product]
-LIFECYCLE: [Durable / Semi-Durable / Consumable]
-YOUR PROFILE: [inferred user profile — budget, use case, experience]
-PRODUCTS: [N] models across [N] brands
-TIERS: [discovered tiers]
-KEY SPECS: [5-8 differentiating specs identified]
-DERIVED METRICS: [1-2 calculated ratios]
-FLAGS: [Ecosystem ✓/✗] [Multi-Use ✓/✗] [Features Matrix ✓/✗] [TCO ✓/✗]
-PROPOSED SECTIONS: [5-8 sections with names]
-DATA SOURCES: [review sites, manufacturer sites, community sources]
-```
+**Extension hook (override):** If an extension with `custom_checkpoint: true` is active, use the extension's checkpoint format instead of the standard format above. Load the format from the extension's `EXTENSION.md` Phase 3D section.
 
 Ask: "Here's what I found and plan to build. Should I proceed, or adjust anything?"
 
@@ -388,7 +336,7 @@ Gather data for every cell in the dimension matrix.
 
 See [subgroup-discovery.md](references/subgroup-discovery.md) for data quality tier definitions.
 
-**Product/Purchase lens:** See [product-comparison-template.md](references/product-comparison-template.md#phase-4-additions-product-data-gathering) for per-product data gathering, ecosystem data, and TCO components.
+**Extension hook (augment):** If an extension is active, load its Phase 4 instructions for domain-specific data gathering patterns.
 
 ---
 
@@ -415,18 +363,23 @@ Organize by narrative flow:
 
 Each section: title + subtitle + 1-3 chart cards + insight callout + filters where applicable.
 
-**Product/Purchase lens:** See [product-comparison-template.md](references/product-comparison-template.md#phase-5-additions-product-analysis) for product key findings, visualization selection, dashboard structure, and recommendation engine.
+**Extension hook (augment):** If an extension is active, load its Phase 5 instructions for domain-specific analysis patterns, visualization selection, and dashboard structure.
 
 ---
 
 ## Phase 6: BUILD — Build Into Research Hub
 
-All projects are built into the Research Hub — a single web application that hosts all research dashboards. **Never create a standalone Vite project.** The hub was set up in Phase 0.
+All outputs are built into the Research Hub — a single web application that hosts all research dashboards and collections. **Never create a standalone Vite project.** The hub was set up in Phase 0.
 
 See [hub-architecture.md](references/hub-architecture.md) for the hub directory structure, config schema, and project registry format.
 See [build-templates.md](references/build-templates.md) for data schemas, component patterns, and design principles.
+See [collections-architecture.md](references/collections-architecture.md) for template-mode collection structure and rendering.
 
-### Steps:
+### Output Mode: Bespoke (default)
+
+Standard pipeline — each run produces a unique React project.
+
+#### Steps:
 
 1. **Read pointer config** (`~/.codeium/windsurf/skills/research-visualizer/config.json`) to get `personalHubPath`
 2. **Read `hub-config.json`** from `<personalHubPath>/hub-config.json` for port and project list
@@ -439,22 +392,25 @@ See [build-templates.md](references/build-templates.md) for data schemas, compon
    - `components/` — all section components (Overview, Sources, etc.)
    - `data/` — all data files as ES module exports
 6. **Update the project registry** based on visibility:
-   - `"personal"` or `"public"`: Update `<personalHubPath>/src/projects/index.js` — add lazy import + metadata entry
-   - `"local"`: Update `<personalHubPath>/src/local-projects/index.js` — add lazy import + metadata entry (create the file if it doesn't exist, using the same format as `src/projects/index.js`)
+   - `"personal"` or `"public"`: Update `<personalHubPath>/src/projects/index.js` — add lazy import + lightweight metadata entry (slug, title, subtitle, query, lens, icon, accentColor, visibility, createdAt only — **no telemetry**)
+   - `"local"`: Update `<personalHubPath>/src/local-projects/index.js` — same lightweight format (create the file if it doesn't exist)
 7. **Update config** based on visibility:
-   - `"personal"` or `"public"`: Add the project to `hub-config.json` `projects` array with metadata + original user query + `visibility` field
-   - `"local"`: Add the project to `.local-config.json` `localProjects` array with the same schema + `visibility: "local"`
-   - **Do NOT include telemetry yet** — telemetry is computed and persisted in Phase 7 step 4. See [Visibility Tiers](references/hub-architecture.md#visibility-tiers).
+   - `"personal"` or `"public"`: Add the project to `hub-config.json` `projects` array with lightweight metadata + original user query + `visibility` field — **no telemetry** (telemetry goes in `meta.json` only)
+   - `"local"`: Add the project to `.local-config.json` `localProjects` array with the same lightweight schema + `visibility: "local"`
+   - See [Visibility Tiers](references/hub-visibility.md#the-three-tiers).
 8. **Check dev server status:**
    - If Vite is already running on the hub port → tell user to refresh their browser (Vite HMR will pick up new files)
    - If Vite is NOT running → start it from `<personalHubPath>`: `npm run dev`
 9. **Open browser preview** on the hub's port
 
-### Project File Structure (within the hub):
+**Extension hook (augment):** If an extension is active, load its Phase 6 instructions for domain-specific file structure, component patterns, and build order.
+
+#### Project File Structure (within the hub):
 
 ```
 <hubPath>/src/projects/<slug>/
 ├── App.jsx                    # Project's own App with internal sidebar nav + section routing
+├── meta.json                  # Telemetry + run metadata (written in Phase 7 step 4)
 ├── components/
 │   ├── CustomTooltip.jsx      # Dark-themed chart tooltips
 │   ├── InsightCallout.jsx     # Colored callout boxes
@@ -465,7 +421,21 @@ See [build-templates.md](references/build-templates.md) for data schemas, compon
     └── researchData.js        # All research data as ES module exports
 ```
 
-**Product/Purchase lens:** See [product-comparison-template.md](references/product-comparison-template.md#phase-6-additions-product-build) for product file structure, component patterns, and build order.
+### Output Mode: Template (extension-driven)
+
+When the active extension has `output_mode: template`, Phase 6 produces a JSON data file instead of a React project. See [collections-architecture.md](references/collections-architecture.md) for the full specification.
+
+#### Steps:
+
+1. **Read pointer config** and `hub-config.json` (same as bespoke steps 1-2)
+2. **Check if collection exists:** Look for `<personalHubPath>/src/collections/<extension-slug>/`
+   - **If not:** First-run setup — copy `Template.jsx` and `schema.json` from the extension directory, create `manifest.json` with empty items array, create `items/` directory. Add collection entry to `hub-config.json` `collections` array.
+   - **If yes:** Collection already installed — proceed to step 3.
+3. **Generate item slug** (kebab-case from item identifier, e.g., "inc-0012345")
+4. **Write item JSON** to `<personalHubPath>/src/collections/<extension-slug>/items/<item-slug>.json`
+5. **Update manifest.json** — add item entry with slug, title, subtitle, createdAt, tags, searchText
+6. **Update `hub-config.json`** — increment `itemCount` and update `lastUpdated` on the collection entry
+7. **Check dev server / open browser** (same as bespoke steps 8-9)
 
 ### Important: Store the User's Original Query
 
@@ -479,16 +449,20 @@ When updating `hub-config.json` and `projects/index.js`, always store the user's
 
 1. **Build test:** Run `npx vite build` from the hub directory — must complete with zero errors
 2. **QA:** Charts render, axis labels visible, tooltips correct, findings match data, citations complete, T4 estimates marked
-3. **Product QA:** See [product-comparison-template.md](references/product-comparison-template.md#phase-7-additions-product-qa) for product-specific checks.
+3. **Extension QA:** If an extension is active, load its Phase 7 instructions for domain-specific QA checks.
 
 4. **Finalize telemetry — GATE (steps 5-8 MUST NOT run until this is done):**
-   Compute ALL telemetry fields from [hub-architecture.md](references/hub-architecture.md#telemetry-schema) and persist to BOTH `hub-config.json` AND `projects/index.js`. This includes: `runStartedAt`, `runCompletedAt`, `durationMinutes`, `skillVersion`, `userPrompt`, `researchPlan`, `checkpointModified`, `searchesPerformed`, `sourcesCount`, `sectionsBuilt`, `chartsBuilt`, `filesGenerated`, `dataPointsCollected`, `phaseTiming` (all 8 phases), `contentAnalysis` (FK grade, Bloom's, word count), `hoursSaved` (using formulas from hub-architecture.md), `consumptionTime`, and optional quality fields: `dataQualityDistribution` (T1-T4 counts), `sourceDiversityScore`, `promptComplexity`. Every field in the schema is required — do not skip any.
+   Compute ALL telemetry fields from [hub-architecture.md](references/hub-architecture.md#telemetry-schema) and persist to the project's `meta.json` file at `<hubPath>/src/projects/<slug>/meta.json` (or `src/local-projects/<slug>/meta.json` for local projects). This includes: `runStartedAt`, `runCompletedAt`, `durationMinutes`, `skillVersion`, `userPrompt`, `researchPlan`, `checkpointModified`, `searchesPerformed`, `sourcesCount`, `sectionsBuilt`, `chartsBuilt`, `filesGenerated`, `dataPointsCollected`, `phaseTiming` (all 8 phases), `contentAnalysis` (FK grade, Bloom's, word count), `hoursSaved` (using formulas from hub-architecture.md), `consumptionTime`, and optional quality fields: `dataQualityDistribution` (T1-T4 counts), `sourceDiversityScore`, `promptComplexity`. Every field in the schema is required — do not skip any.
+   
+   **Important:** Telemetry lives ONLY in `meta.json` — NOT in `hub-config.json` or `projects/index.js`. Those files contain only lightweight metadata. The hub lazy-loads telemetry from `meta.json` on demand.
+   
+   **Template mode:** For template-mode extensions, telemetry is embedded in the item JSON file (not a separate meta.json). The extension's `schema.json` defines which telemetry fields are relevant.
 
 5. **Git sync (personal):** If the hub has a git remote: `git add -A` → `git commit` → `git push`. If push fails, note it.
 
 6. **Library share (gated by visibility):** Only share if the project's `visibility` is `"public"`. If `visibility` is `"personal"` or `"local"` (or missing — treated as `"personal"`), **skip sharing entirely**. For public projects, proceed for each library where contribution intent is yes (from Phase 3D):
-   - Push project files + updated `index.js` (with full telemetry) to the library's `branch` via the GitHub API. Library slug = `<slug>-<gitUsername>`.
-   - See [hub-architecture.md](references/hub-architecture.md#agent-side-contribution-flow-phase-7-step-8) for the complete API flow.
+   - Push project files (including `meta.json`) + updated `index.js` (lightweight metadata only) to the library's `branch` via the GitHub API. Library slug = `<slug>-<gitUsername>`.
+   - See [hub-contribution.md](references/hub-contribution.md#agent-side-contribution-flow-phase-7-step-8) for the complete API flow.
    - If 401/403: PAT may be invalid — suggest contacting the library maintainer.
 
 7. **Library sync:** For each library just pushed to, pull the latest into the local library clone: `git -C <localPath> pull`. This ensures the hub shows the user's contribution in the library view.

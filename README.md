@@ -2,7 +2,7 @@
 
 An intelligent agentic AI skill that takes a simple research topic and autonomously discovers dimensions, metrics, subgroups, and taxonomies — then produces a polished interactive web dashboard with statistical visualizations.
 
-Includes a **Product/Purchase specialization** that auto-detects when a user wants to compare products or make a buying decision, and scaffolds a comprehensive product comparison dashboard with specs, pricing, cost analysis, recommendations, purchase links, and data-driven analysis.
+Supports a **pluggable extension system** with two output modes: **bespoke** (unique React dashboards) and **template** (shared component + JSON data for high-volume structured reports). Extensions auto-detect from user prompts and augment the pipeline with domain-specific logic. The first extension — **Product/Purchase Comparison** — auto-detects purchase intent and scaffolds comprehensive product comparison dashboards.
 
 ## The Problem This Solves
 
@@ -21,15 +21,16 @@ This skill flips that. You give it a topic in plain English. It figures out the 
 ```
 ENVIRONMENT CHECK → INTERPRET → SURVEY → DISCOVER → RESEARCH → ANALYZE → BUILD → PRESENT
        ↓                ↓                               ↓
-  Hub exists?       Product lens?                User Checkpoint
+  Hub exists?       Extension?                   User Checkpoint
     ↓ no               ↓ yes                    (lightweight approval)
-  FIRST-TIME SETUP  PRODUCT CLASSIFY
+  FIRST-TIME SETUP  Extension Phase 1B
+                      (inject: classify, scope, configure)
 ```
 
 | Phase | What Happens | User Effort |
 |-------|-------------|-------------|
 | **ENVIRONMENT CHECK** | Detects existing Research Hub install or walks through first-time setup | None (or pick install location once) |
-| **INTERPRET** | Parses natural language into topic, populations, time scope, research lenses. Auto-detects Product/Purchase intent. | None |
+| **INTERPRET** | Parses natural language into topic, populations, time scope, research lenses. Scans for extension triggers. | None |
 | **SURVEY** | Broad literature scan — finds major studies, datasets, known dimensions | None |
 | **DISCOVER** | Finds meaningful subgroups, core metrics, domain taxonomies (25-30 items per category) | None |
 | *Checkpoint* | *Agent presents: "Here's what I found. Here's my plan. Proceed?"* | *"Yes" or adjust* |
@@ -80,6 +81,14 @@ Every research dashboard you create lives in a single **Research Hub** — one w
 - **First run**: The skill detects it's your first time, asks where to install the hub (default: `~/git/personal-research-hub/`), scaffolds the app, and installs dependencies once.
 - **Every run after**: The skill finds your existing hub in under 2 seconds, builds the new research directly into it, and tells you to refresh your browser. That's it.
 
+### Public Library & Architecture Docs
+
+Once you set up your personal hub, the skill can connect you to the **[Community Research Hub](https://github.com/mrshaun13/research-hub)** — a public library of community-contributed research dashboards. After pulling the public library:
+
+- **Browse shared research** — explore dashboards built by other users, read-only
+- **Contribute your own** — share any of your projects to the library with a single visibility change
+- **Learn how the skill works** — the public library repository includes the complete **Research Visualizer v7 architecture documentation**, covering the extension system, pipeline phases, hub config schema, telemetry format, visibility tiers, contribution flow, and collections architecture. If you want to understand how the skill builds dashboards or how to create your own extensions, it's all there.
+
 ### The Experience
 
 The hub provides a **ChatGPT-style interface**:
@@ -106,10 +115,12 @@ The agent knows where everything lives because the hub's `hub-config.json` track
 | File | Location | Purpose |
 |------|----------|--------|
 | `config.json` | `~/.codeium/windsurf/skills/research-visualizer/config.json` | Machine-local pointer — contains only `personalHubPath` |
-| `hub-config.json` | `<personalHubPath>/hub-config.json` | Portable config (git-synced) — port, libraries, projects, telemetry |
+| `hub-config.json` | `<personalHubPath>/hub-config.json` | Portable config (git-synced) — port, libraries, projects, collections |
 | `.local-config.json` | `<personalHubPath>/.local-config.json` | Machine-local (gitignored) — library paths for Vite aliases |
-| `projects/index.js` | `<personalHubPath>/src/projects/index.js` | Runtime registry — lazy imports and metadata for the React app |
-| Project files | `<personalHubPath>/src/projects/<slug>/` | Each project's App.jsx, components/, and data/ |
+| `projects/index.js` | `<personalHubPath>/src/projects/index.js` | Runtime registry — lightweight metadata + lazy imports (no telemetry) |
+| `<slug>/meta.json` | `<personalHubPath>/src/projects/<slug>/meta.json` | Per-project telemetry (lazy-loaded by hub UI on demand) |
+| Project files | `<personalHubPath>/src/projects/<slug>/` | Each project's App.jsx, components/, data/, and meta.json |
+| Collection files | `<personalHubPath>/src/collections/<ext-slug>/` | Template mode: Template.jsx, manifest.json, schema.json, items/ |
 
 ### Project Telemetry
 
@@ -138,7 +149,7 @@ Every research project automatically captures telemetry about its creation — n
 - Total hours saved across all projects (highlighted in green)
 - Total AI build time, web searches, sources, charts, data points, and products compared
 
-**Also captured but stored in config (not displayed on cards):**
+**Also captured in meta.json (not displayed on cards):**
 - **Original prompt** — the exact text you typed to trigger the skill
 - **Research plan** — the full checkpoint text you approved before the build
 - **Checkpoint modified** — whether you requested changes at the checkpoint
@@ -164,10 +175,21 @@ Built-in methodology frameworks automatically include the right dimensions based
 - **Behavior studies** → prevalence, taxonomy, frequency, outcomes
 - **Industry studies** → market size, revenue distribution, worker conditions
 - **Culture studies** → shifting attitudes across eras, media representation, public opinion
-- **Product/Purchase studies** → specs, pricing, brand comparison, value analysis, purchase recommendations
+### Extension System
 
-### Product Comparison Intelligence
-When a purchase intent is detected, the skill auto-classifies the product lifecycle (Durable/Semi-Durable/Consumable) and sets characteristic flags (Ecosystem Dependency, Multi-Use-Case, High Feature Density, etc.) that drive which dashboard sections get built. A vehicle dashboard includes 5-year TCO analysis because cars last a decade; a phone case dashboard skips TCO because they're disposable — all decided automatically.
+Specialized workflows are handled by pluggable extensions that auto-detect from user prompts:
+
+- **Bespoke mode** (default) — each run produces a unique React component tree (full project with App.jsx, components/, data/, meta.json)
+- **Template mode** — each run produces a JSON data file that feeds into a shared React template component, scaling to 10,000+ items per collection
+
+Extensions hook into pipeline phases with three strategies: **augment** (add alongside standard behavior), **override** (replace standard behavior), or **inject** (add new phases like 1B).
+
+**Installed extensions:**
+- **Product/Purchase Comparison** (bespoke) — auto-detects purchase intent, classifies product lifecycle, and scaffolds comparison dashboards with specs, pricing, recommendations, and purchase links
+
+**Example future extensions:**
+- **Incident Review Analyzer** (template) — analyzes service incidents from ServiceNow/Splunk/PCC into structured review dashboards
+- **Sprint Analyzer** (template) — generates sprint analysis reports from Jira data
 
 ### Data-Driven Visualization
 Chart types are selected AFTER data collection based on data shape — not prescribed by the user beforehand. The same data shape always produces the same chart type (deterministic, not random).
@@ -192,21 +214,31 @@ The skill prevents inconsistent output through:
 
 ```
 research-visualizer/
-├── SKILL.md                              # Core skill instructions (v6.0)
+├── SKILL.md                              # Core pipeline instructions (v7.0)
 ├── README.md                             # This file
 ├── config.json                           # Machine-local pointer (personalHubPath only, created on first run)
-└── references/
-    ├── hub-architecture.md               # Research Hub: config schema, directory structure, project registry
+├── extensions/                           # Pluggable specializations
+│   ├── registry.md                       # Extension catalog + builder guide
+│   └── product-purchase/                 # First extension (bespoke mode)
+│       ├── EXTENSION.md                  # Product-specific pipeline logic
+│       └── references/
+│           └── product-comparison-template.md
+└── references/                           # Core reference files
+    ├── hub-architecture.md               # Core config schema, directory structure, project registry
+    ├── hub-contribution.md               # Library contribution flow, GitHub API, security model
+    ├── hub-visibility.md                 # Visibility tiers, set-visibility API, UI badges
+    ├── collections-architecture.md       # Template mode: collections, manifest, schema, rendering
+    ├── hub-scaffold-templates.md         # Hub React component templates
     ├── research-dimensions.md            # Standard Research Dimensions Framework
     ├── visualization-rules.md            # Chart type auto-selection rules + color palette
     ├── subgroup-discovery.md             # Split decision matrix + taxonomy search templates + data quality tiers
-    ├── build-templates.md                # Tech stack, file structures, data schemas, component patterns
-    └── product-comparison-template.md    # Product/Purchase specialization: lifecycle classification, section selection, data schemas, component patterns
+    └── build-templates.md                # Tech stack, file structures, data schemas, component patterns
 ```
 
 Follows the [agentskills.io specification](https://agentskills.io/specification):
 - SKILL.md under 500 lines with progressive disclosure via reference files
 - Reference files loaded on-demand, not at activation
+- Extensions loaded only when trigger patterns match
 - Frontmatter includes `name`, `description`, `compatibility`, and `metadata`
 
 ## License
