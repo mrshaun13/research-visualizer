@@ -12,7 +12,7 @@ license: MIT
 compatibility: Requires internet access for web search and data fetching.
 metadata:
   author: mrshaun13
-  version: "7.1"
+  version: "7.2"
 ---
 
 # Deep Research → Interactive Dashboard Pipeline
@@ -451,11 +451,18 @@ This step is **enabled by default** (`glossaryEnrichment: true` in `hub-config.j
 
 ### Density Rules
 
+Term count scales with the amount of explanatory text in the project — text-heavy dashboards get more terms, visual-heavy dashboards get fewer.
+
+**Formula:** `terms = max(3, floor(explanatoryWordCount / 250))`
+
+- **Explanatory text** = overview paragraphs, insight callout text, section subtitles, prose descriptions. Does NOT include chart data, axis labels, data tables, or code snippets.
+- **Floor of 3** — every project gets at least 3 terms so the feature always adds value.
+- **No hard ceiling** — a 5,000-word deep dive naturally gets ~20 terms; a mostly-visual dashboard with 600 words of prose gets 3.
+
 | Rule | Value | Rationale |
 |---|---|---|
-| **Minimum per project** | 3 terms | Ensures the feature always adds value |
+| **Terms per project** | `max(3, floor(words / 250))` | Scales with text volume — more prose means more terms to discover |
 | **Maximum per section** | 2 terms | Prevents tooltip fatigue within a single view |
-| **Maximum per project** | 8 terms | Keeps the dashboard clean, not cluttered |
 | **No stacking** | Never two terms in the same sentence | Pick the more obscure one if both qualify |
 
 ### Term Selection Criteria
@@ -497,10 +504,13 @@ Identify terms using this priority order (highest first):
 - **Click/tap:** Opens a compact flyout card anchored below the term:
   - **Term** in bold at top
   - **Definition** (1-2 sentences) in normal text
-  - **"Research this →"** button at bottom — clicking copies the research prompt to clipboard and shows a brief "Copied!" confirmation
+  - **Label:** "Deep dive with Research Visualizer:" in small uppercase gray text
+  - **Prompt box** — a dark rounded container (like GitHub's clone URL box) showing the full research prompt in monospace text with a clipboard copy button on the right. The prompt is **always visible** — the user can read it, understand what it does, and optionally copy it. On copy, the clipboard icon swaps to a checkmark for 2s.
 - **Dismiss:** Click outside the flyout, press Escape, or click another glossary term.
 - **Mobile:** Flyout becomes a bottom sheet on small screens.
 - **Positioning:** Flyout auto-positions to stay within viewport (flip above if near bottom edge).
+
+See [build-templates.md](references/build-templates.md#glossaryterm-component) for the complete component specification and styling details.
 
 ---
 
