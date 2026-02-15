@@ -228,7 +228,7 @@ The skill prevents inconsistent output through:
 
 ```
 research-visualizer/
-├── SKILL.md                              # Core pipeline instructions (v7.1)
+├── SKILL.md                              # Core pipeline instructions (v7.2.1)
 ├── README.md                             # This file
 ├── config.json                           # Machine-local pointer (personalHubPath only, created on first run)
 ├── extensions/                           # Pluggable specializations
