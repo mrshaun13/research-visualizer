@@ -452,13 +452,21 @@ Landing page with two browsable areas: "My Research" (all user project cards wit
 
 **Telemetry lazy-loading:** Project cards fetch telemetry from `meta.json` on demand (not from the registry). The registry contains only lightweight metadata. HubHome uses `useEffect` to load `meta.json` for visible project cards and caches the results. This keeps the initial page load fast even with 100+ projects.
 
+**Extended Telemetry Flyout:** Each project card has a single `ChevronRight` detail button in the footer right side. Clicking it opens a `ProjectDetailFlyout` slide-in panel from the right with full telemetry breakdown (phase timeline, build profile radar, hours saved chart, content analysis, efficiency metrics, data quality, build stats, research plan). The flyout uses `fixed` positioning with `z-50` to escape any `overflow-hidden` ancestors. Clicking the card body (anywhere except the chevron or compare checkbox) navigates into the project. There is NO separate `ArrowRight` icon — the `ChevronRight` is the only arrow in the card footer.
+
+**Compare View:** Each project card has a compare checkbox in the **absolute top-right corner** (`top-2.5 right-2.5`), hidden by default (`opacity-0`) and revealed on hover (`group-hover:opacity-100`). Stays visible when checked. When 2+ projects are selected, a floating "Compare N projects" button appears at `fixed bottom-6 right-6`. Clicking it opens a `CompareView` overlay with side-by-side telemetry comparison using radar charts and bar charts.
+
+**Card root element:** `ProjectCard` uses a `<div>` with `role="button"` and `tabIndex={0}` instead of a `<button>` element. This is required because the card contains interactive children (compare checkbox, detail chevron) — nested `<button>` elements inside a `<button>` are invalid HTML and browsers will not fire click events on the inner elements.
+
 ```jsx
 import React, { useState } from 'react';
 import {
-  FlaskConical, ArrowRight, Sparkles, Clock, Search, BarChart3,
+  FlaskConical, Sparkles, Clock, Search, BarChart3,
   FileText, Database, Package, Timer, BookOpen, Zap, GraduationCap, Brain, Eye,
-  Library, Users, HardDrive, GitBranch, Globe,
+  Library, Users, HardDrive, GitBranch, Globe, ChevronRight,
 } from 'lucide-react';
+import ProjectDetailFlyout from './ProjectDetailFlyout';
+import CompareView from './CompareView';
 
 const LENS_BADGES = {
   standard: { label: 'Research', bg: 'bg-blue-500/10', text: 'text-blue-400', border: 'border-blue-500/20' },
@@ -572,139 +580,36 @@ function VisibilityBadge({ visibility = 'personal' }) {
   );
 }
 
-function VisibilitySelector({ slug, visibility = 'personal', onVisibilityChange }) {
-  const [showDropdown, setShowDropdown] = useState(false);
-  const [showConfirm, setShowConfirm] = useState(null); // null or target visibility
-  const [loading, setLoading] = useState(false);
-
-  const tiers = ['local', 'personal', 'public'];
-  const currentIndex = tiers.indexOf(visibility);
-
-  const handleSelect = (newVis) => {
-    setShowDropdown(false);
-    if (newVis === visibility) return;
-
-    const newIndex = tiers.indexOf(newVis);
-    const isUpgrade = newIndex > currentIndex;
-    const isDowngradeToLocal = newVis === 'local' && visibility !== 'local';
-
-    if (isUpgrade || isDowngradeToLocal) {
-      setShowConfirm(newVis); // requires confirmation
-    } else {
-      applyChange(newVis); // downgrade public→personal is instant
-    }
-  };
-
-  const applyChange = async (newVis) => {
-    setLoading(true);
-    try {
-      const res = await fetch('/api/set-visibility', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ slug, visibility: newVis }),
-      });
-      if (res.ok) onVisibilityChange(slug, newVis);
-    } catch (err) {
-      console.error('Failed to change visibility:', err);
-    }
-    setLoading(false);
-    setShowConfirm(null);
-  };
-
-  const confirmMessages = {
-    personal: 'Sync this project to your personal repo? It will be available on all your machines.',
-    public: 'Make this project public? It will be synced to your repo and shared to configured libraries.',
-    local: 'Move this project to local-only? It will be removed from your personal repo on next sync. Files remain locally and in git history.',
-  };
-
-  return (
-    <>
-      <div className="relative">
-        <button
-          onClick={(e) => { e.stopPropagation(); setShowDropdown(!showDropdown); }}
-          disabled={loading}
-          className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium border transition-colors cursor-pointer ${
-            VISIBILITY_CONFIG[visibility]?.bg} ${VISIBILITY_CONFIG[visibility]?.text} ${VISIBILITY_CONFIG[visibility]?.border
-          } hover:opacity-80`}
-          title="Click to change visibility"
-        >
-          {React.createElement(VISIBILITY_CONFIG[visibility]?.icon || GitBranch, { className: 'w-2.5 h-2.5' })}
-          {VISIBILITY_CONFIG[visibility]?.label || 'Synced'}
-        </button>
-
-        {showDropdown && (
-          <div className="absolute top-full left-0 mt-1 z-30 bg-gray-900 border border-gray-700 rounded-lg shadow-xl py-1 min-w-[120px]"
-            onClick={(e) => e.stopPropagation()}>
-            {tiers.map((tier) => {
-              const cfg = VISIBILITY_CONFIG[tier];
-              const Icon = cfg.icon;
-              const isActive = tier === visibility;
-              return (
-                <button key={tier} onClick={() => handleSelect(tier)}
-                  className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs transition-colors ${
-                    isActive ? `${cfg.text} ${cfg.bg}` : 'text-gray-400 hover:text-white hover:bg-gray-800'
-                  }`}>
-                  <Icon className="w-3 h-3" />
-                  {cfg.label}
-                  {isActive && <span className="ml-auto text-[10px]">✓</span>}
-                </button>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
-      {/* Confirmation dialog */}
-      {showConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={(e) => e.stopPropagation()}>
-          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowConfirm(null)} />
-          <div className="relative bg-gray-900 border border-gray-700 rounded-xl p-6 max-w-sm mx-4 shadow-2xl">
-            <div className="flex items-center gap-3 mb-4">
-              <div className={`w-10 h-10 rounded-lg ${VISIBILITY_CONFIG[showConfirm]?.bg} flex items-center justify-center`}>
-                {React.createElement(VISIBILITY_CONFIG[showConfirm]?.icon || GitBranch, {
-                  className: `w-5 h-5 ${VISIBILITY_CONFIG[showConfirm]?.text}`
-                })}
-              </div>
-              <h3 className="text-sm font-semibold text-white">
-                Change to {VISIBILITY_CONFIG[showConfirm]?.label}?
-              </h3>
-            </div>
-            <p className="text-xs text-gray-400 leading-relaxed mb-5">
-              {confirmMessages[showConfirm]}
-            </p>
-            <div className="flex gap-3 justify-end">
-              <button onClick={() => setShowConfirm(null)}
-                className="px-3 py-1.5 text-xs text-gray-400 hover:text-white border border-gray-700 rounded-lg hover:border-gray-600 transition-colors">
-                Cancel
-              </button>
-              <button onClick={() => applyChange(showConfirm)} disabled={loading}
-                className={`px-3 py-1.5 text-xs text-white rounded-lg transition-colors disabled:opacity-50 ${
-                  showConfirm === 'local' ? 'bg-gray-600 hover:bg-gray-500' :
-                  showConfirm === 'public' ? 'bg-emerald-600 hover:bg-emerald-500' :
-                  'bg-blue-600 hover:bg-blue-500'
-                }`}>
-                {loading ? 'Changing...' : 'Confirm'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </>
-  );
-}
-
-function ProjectCard({ project, onProjectClick, getAccent, formatDate, ProjectIcon, source = 'local', onVisibilityChange }) {
+function ProjectCard({ project, onProjectClick, getAccent, formatDate, ProjectIcon, source = 'local', telemetry, onDetailClick, compareSelected, onCompareToggle }) {
   const accent = getAccent(project.accentColor);
-  const t = project.telemetry;
+  const t = telemetry;
   const isLibrary = source === 'library';
 
   return (
-    <button
+    <div
       onClick={() => onProjectClick(project.slug, source)}
-      className="group relative text-left p-5 rounded-xl border border-gray-800/80 bg-gray-900/50 hover:bg-gray-800/50 hover:border-gray-700 transition-all duration-200 hover:shadow-lg hover:shadow-black/20"
+      role="button"
+      tabIndex={0}
+      className={`group relative text-left p-5 rounded-xl border bg-gray-900/50 hover:bg-gray-800/50 hover:border-gray-700 transition-all duration-200 hover:shadow-lg hover:shadow-black/20 cursor-pointer ${compareSelected ? 'border-indigo-500/60 ring-1 ring-indigo-500/20' : 'border-gray-800/80'}`}
     >
       {/* Accent top border */}
       <div className={`absolute top-0 left-4 right-4 h-px ${accent.border} opacity-50 group-hover:opacity-100 transition-opacity`} />
+
+      {/* Compare checkbox — top-right, hidden until hover */}
+      {onCompareToggle && (
+        <label
+          className={`absolute top-2.5 right-2.5 z-10 flex items-center justify-center w-5 h-5 rounded transition-opacity cursor-pointer ${compareSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
+          onClick={(e) => e.stopPropagation()}
+          title="Select for comparison"
+        >
+          <input
+            type="checkbox"
+            checked={!!compareSelected}
+            onChange={() => onCompareToggle(project.slug)}
+            className="w-3.5 h-3.5 rounded border-gray-600 bg-gray-800 text-indigo-500 focus:ring-indigo-500/20 focus:ring-offset-0 cursor-pointer"
+          />
+        </label>
+      )}
 
       <div className="flex items-start gap-3.5">
         <div className={`w-9 h-9 rounded-lg ${accent.bg} flex items-center justify-center flex-shrink-0 mt-0.5`}>
@@ -776,9 +681,7 @@ function ProjectCard({ project, onProjectClick, getAccent, formatDate, ProjectIc
         <div className="flex items-center gap-2">
           <LensBadge lens={project.lens} />
           {isLibrary && <CommunityBadge />}
-          {!isLibrary && onVisibilityChange && (
-            <VisibilitySelector slug={project.slug} visibility={project.visibility || 'personal'} onVisibilityChange={onVisibilityChange} />
-          )}
+          {!isLibrary && <VisibilityBadge visibility={project.visibility || 'personal'} />}
           <span className="text-[10px] text-gray-600">
             {formatDate(project.createdAt)}
           </span>
@@ -804,25 +707,58 @@ function ProjectCard({ project, onProjectClick, getAccent, formatDate, ProjectIc
             </>
           )}
         </div>
-        <ArrowRight className="w-3.5 h-3.5 text-gray-600 group-hover:text-gray-400 group-hover:translate-x-0.5 transition-all flex-shrink-0" />
+        {onDetailClick && (
+          <div
+            onClick={(e) => { e.stopPropagation(); onDetailClick(project.slug, source); }}
+            role="button"
+            className="p-1 rounded hover:bg-gray-700/50 text-gray-500 hover:text-indigo-400 transition-colors cursor-pointer"
+            title="Extended telemetry"
+          >
+            <ChevronRight className="w-4 h-4" />
+          </div>
+        )}
       </div>
-    </button>
+    </div>
   );
 }
 
 export default function HubHome({ projects, publicProjects = [], onProjectClick, getAccent, formatDate, ProjectIcon }) {
   const [librarySearch, setLibrarySearch] = useState('');
   const [includeMyResearch, setIncludeMyResearch] = useState(false);
-  const [visibilityOverrides, setVisibilityOverrides] = useState({});
+  const [detailProject, setDetailProject] = useState(null);
+  const [compareSelection, setCompareSelection] = useState({});
+  const [showCompare, setShowCompare] = useState(false);
 
-  const handleVisibilityChange = (slug, newVisibility) => {
-    setVisibilityOverrides(prev => ({ ...prev, [slug]: newVisibility }));
+  // Telemetry is pre-loaded at module level via import.meta.glob
+  const telemetryCache = TELEMETRY_CACHE;
+
+  const handleDetailClick = (slug, source) => {
+    const allProjects = [...projects, ...publicProjects];
+    const project = allProjects.find(p => p.slug === slug);
+    if (project) {
+      setDetailProject({ ...project, telemetry: telemetryCache[slug], _source: source });
+    }
   };
+
+  const handleCompareToggle = (slug) => {
+    setCompareSelection(prev => {
+      const next = { ...prev };
+      if (next[slug]) delete next[slug];
+      else next[slug] = true;
+      return next;
+    });
+  };
+
+  const compareCount = Object.keys(compareSelection).length;
+  const allProjectsWithTelemetry = [...projects, ...publicProjects].map(p => ({
+    ...p, telemetry: telemetryCache[p.slug],
+  }));
+  const compareProjects = allProjectsWithTelemetry.filter(p => compareSelection[p.slug]);
 
   // Merge live visibility overrides into project data
   const projectsWithVisibility = projects.map(p => ({
     ...p,
-    visibility: visibilityOverrides[p.slug] || p.visibility || 'personal',
+    visibility: p.visibility || 'personal',
   }));
 
   const sortedPublicProjects = [...publicProjects].sort(
@@ -893,7 +829,10 @@ export default function HubHome({ projects, publicProjects = [], onProjectClick,
                 formatDate={formatDate}
                 ProjectIcon={ProjectIcon}
                 source="local"
-                onVisibilityChange={handleVisibilityChange}
+                telemetry={telemetryCache[project.slug]}
+                onDetailClick={handleDetailClick}
+                compareSelected={compareSelection[project.slug]}
+                onCompareToggle={handleCompareToggle}
               />
             ))}
           </div>
@@ -948,6 +887,10 @@ export default function HubHome({ projects, publicProjects = [], onProjectClick,
                 formatDate={formatDate}
                 ProjectIcon={ProjectIcon}
                 source="library"
+                telemetry={telemetryCache[project.slug]}
+                onDetailClick={handleDetailClick}
+                compareSelected={compareSelection[project.slug]}
+                onCompareToggle={handleCompareToggle}
               />
             ))}
             {filteredPublicProjects.length === 0 && (
@@ -957,6 +900,33 @@ export default function HubHome({ projects, publicProjects = [], onProjectClick,
             )}
           </div>
         </div>
+      )}
+      {/* Floating compare button */}
+      {compareCount >= 2 && (
+        <button
+          onClick={() => setShowCompare(true)}
+          className="fixed bottom-6 right-6 z-30 flex items-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium rounded-xl shadow-lg shadow-indigo-500/30 transition-all"
+        >
+          Compare {compareCount} projects
+        </button>
+      )}
+
+      {/* Extended telemetry flyout */}
+      {detailProject && (
+        <ProjectDetailFlyout
+          project={detailProject}
+          allProjects={allProjectsWithTelemetry}
+          onClose={() => setDetailProject(null)}
+        />
+      )}
+
+      {/* Compare view overlay */}
+      {showCompare && compareProjects.length >= 2 && (
+        <CompareView
+          projects={compareProjects}
+          allProjects={allProjectsWithTelemetry}
+          onClose={() => setShowCompare(false)}
+        />
       )}
     </div>
   );
@@ -1026,7 +996,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
-import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync } from 'fs';
+import { readFileSync, existsSync } from 'fs';
 
 // Read machine-local config for library paths (gitignored, created by skill during Phase 0)
 const localConfigPath = path.resolve(__dirname, '.local-config.json');
@@ -1047,88 +1017,6 @@ if (localConfig.libraries) {
 export default defineConfig({
   plugins: [
     react(),
-    {
-      name: 'visibility-api',
-      configureServer(server) {
-        server.middlewares.use('/api/set-visibility', async (req, res) => {
-          if (req.method !== 'POST') {
-            res.statusCode = 405;
-            res.end(JSON.stringify({ error: 'Method not allowed' }));
-            return;
-          }
-          let body = '';
-          req.on('data', chunk => { body += chunk; });
-          req.on('end', () => {
-            const backup = {};
-            try {
-              const { slug, visibility } = JSON.parse(body);
-              if (!['local', 'personal', 'public'].includes(visibility)) {
-                res.statusCode = 400;
-                res.end(JSON.stringify({ error: 'Invalid visibility' }));
-                return;
-              }
-
-              const configPath = path.resolve(__dirname, 'hub-config.json');
-              const lcPath = path.resolve(__dirname, '.local-config.json');
-              const config = JSON.parse(readFileSync(configPath, 'utf-8'));
-              const lc = existsSync(lcPath)
-                ? JSON.parse(readFileSync(lcPath, 'utf-8'))
-                : { libraries: [] };
-              if (!lc.localProjects) lc.localProjects = [];
-
-              // Snapshot for rollback
-              backup.config = JSON.stringify(config, null, 2);
-              backup.lc = JSON.stringify(lc, null, 2);
-
-              const inMain = config.projects.find(p => p.slug === slug);
-              const inLocal = lc.localProjects.find(p => p.slug === slug);
-              const project = inMain || inLocal;
-              if (!project) {
-                res.statusCode = 404;
-                res.end(JSON.stringify({ error: 'Project not found' }));
-                return;
-              }
-
-              const currentVis = project.visibility || 'personal';
-              const movingToLocal = visibility === 'local' && currentVis !== 'local';
-              const movingFromLocal = visibility !== 'local' && currentVis === 'local';
-
-              const projectsDir = path.resolve(__dirname, 'src/projects', slug);
-              const localDir = path.resolve(__dirname, 'src/local-projects', slug);
-
-              if (movingToLocal && existsSync(projectsDir)) {
-                mkdirSync(path.resolve(__dirname, 'src/local-projects'), { recursive: true });
-                renameSync(projectsDir, localDir);
-                config.projects = config.projects.filter(p => p.slug !== slug);
-                project.visibility = 'local';
-                lc.localProjects.push(project);
-              } else if (movingFromLocal && existsSync(localDir)) {
-                renameSync(localDir, projectsDir);
-                lc.localProjects = lc.localProjects.filter(p => p.slug !== slug);
-                project.visibility = visibility;
-                config.projects.push(project);
-              } else {
-                project.visibility = visibility;
-              }
-
-              writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n');
-              writeFileSync(lcPath, JSON.stringify(lc, null, 2) + '\n');
-
-              res.setHeader('Content-Type', 'application/json');
-              res.end(JSON.stringify({ ok: true, slug, visibility, moved: movingToLocal || movingFromLocal }));
-            } catch (e) {
-              // Rollback on failure
-              try {
-                if (backup.config) writeFileSync(path.resolve(__dirname, 'hub-config.json'), backup.config + '\n');
-                if (backup.lc) writeFileSync(path.resolve(__dirname, '.local-config.json'), backup.lc + '\n');
-              } catch (_) {}
-              res.statusCode = 500;
-              res.end(JSON.stringify({ error: e.message }));
-            }
-          });
-        });
-      },
-    },
   ],
   build: {
     target: 'esnext',

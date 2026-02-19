@@ -43,8 +43,8 @@ Contains everything else: port, gitRepo, libraries, projects, telemetry. Committ
       "token": "<contributor PAT>",
       "gitUsername": "jdoe",
       "browseEnabled": true,
-      "contributeEnabled": true,
-      "confirmEachShare": false,
+      "contributeEnabled": false,
+      "confirmEachShare": true,
       "role": "contributor"
     }
   ],
@@ -121,8 +121,8 @@ Each entry in the `libraries` array represents a shared research library. Multip
 | `libraries[].token` | string or null | Fine-grained PAT for contributing. `null` if browse-only. |
 | `libraries[].gitUsername` | string or null | From `git config user.name` — appended to slugs for collision avoidance. `null` if browse-only. |
 | `libraries[].browseEnabled` | boolean | Whether the user can browse this library's projects |
-| `libraries[].contributeEnabled` | boolean | Whether the agent should push completed research to this library |
-| `libraries[].confirmEachShare` | boolean | If true, ask before each contribution. If false, auto-share. |
+| `libraries[].contributeEnabled` | boolean | Whether the agent should push completed research to this library. Defaults to `false` until the user explicitly provides a library remote AND a valid PAT. |
+| `libraries[].confirmEachShare` | boolean | If `true` (default), ask before each contribution. If `false`, auto-share without asking (power-user opt-in). |
 | `libraries[].role` | string | `"maintainer"` or `"contributor"` — affects UI badges and permissions |
 
 ### Layer 3: Machine-Local Vite Config (Gitignored)

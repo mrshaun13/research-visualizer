@@ -12,7 +12,7 @@ license: MIT
 compatibility: Requires internet access for web search and data fetching.
 metadata:
   author: mrshaun13
-  version: "7.2.1"
+  version: "7.2.2"
 ---
 
 # Deep Research → Interactive Dashboard Pipeline
@@ -146,7 +146,8 @@ For each library the user wants to add (start with the default Community Researc
 4. **If yes to contributing:**
    - Capture `git config user.name` (for slug collision avoidance)
    - Ask for the contributor PAT (from the library maintainer). **Note:** The user does NOT need their own GitHub account or any git setup. The PAT is all that's needed — the agent uses the GitHub API directly.
-   - Update the library entry in `hub-config.json`: set `contributeEnabled: true`, `token`, `gitUsername`, `branch: "agent-contributions"`
+   - Update the library entry in `hub-config.json`: set `contributeEnabled: true`, `confirmEachShare: true`, `token`, `gitUsername`, `branch: "agent-contributions"`
+   - **Defaults:** `contributeEnabled` is `false` until the user explicitly provides a library remote AND a valid PAT. `confirmEachShare` defaults to `true` — the agent always asks before sharing. Users can set `confirmEachShare: false` later for auto-share (power-user opt-in).
 
 5. **If no to browsing:** Add library entry with `browseEnabled: false`. User can enable later.
 6. **If no to contributing:** Set `contributeEnabled: false` in the library entry. User can opt in later.
@@ -312,12 +313,16 @@ KEY DATA SOURCES: [major studies]
 Ask: "Here's what I found and plan to build. Should I proceed, or adjust anything?"
 
 **Visibility notice (inform only — do not ask):** After presenting the research plan, inform the user of the default visibility:
-- If `hub-config.json` has a valid `gitRepo`: *"This project will be **personal** by default (synced to your repo). You can change visibility from the hub UI or ask me later."*
-- If `hub-config.json` has NO `gitRepo`: *"This project will be **local** by default (this machine only). You can change visibility from the hub UI or ask me later."*
+- If `hub-config.json` has a valid `gitRepo`: *"This project will be **personal** by default (synced to your repo). You can ask me to change visibility or share to a library later."*
+- If `hub-config.json` has NO `gitRepo`: *"This project will be **local** by default (this machine only). You can ask me to change visibility later."*
 
-See [Visibility Tiers](references/hub-architecture.md#visibility-tiers).
+See [Visibility Tiers](references/hub-visibility.md).
 
-**Contribution intent:** If any library in `hub-config.json` has `contributeEnabled: true` AND `confirmEachShare: true`, also ask: *"Would you like to share this research with [library name] when it's done? (This will make the project public.)"* If the user says yes, set `visibility: "public"` when creating the project in Phase 6. If `confirmEachShare: false`, the project uses the smart default visibility.
+**Contribution intent:** For each library in `hub-config.json` with `contributeEnabled: true`:
+- If `confirmEachShare: true` (default): Ask *"Would you like to share this research with [library name] when it's done? (This will make the project public.)"* If the user says yes, set `visibility: "public"` when creating the project in Phase 6. If no, keep the default visibility.
+- If `confirmEachShare: false` (power-user opt-in): The user pre-approved auto-sharing for this library. Automatically set `visibility: "public"` when creating the project in Phase 6 — no confirmation needed. This ensures Phase 7 step 6 will share the project to the library.
+
+**Important:** Never push to a public library without the user having reviewed and approved the research — either via `confirmEachShare: true` (per-project ask) or `confirmEachShare: false` (blanket pre-approval). The default is always to ask.
 
 This is the ONLY required user interaction between the initial prompt and the final dashboard.
 
