@@ -12,12 +12,15 @@
  *   node scripts/hub-gen.mjs <hub-root> write-meta <slug> <json> # Write validated meta.json
  *   node scripts/hub-gen.mjs <hub-root> install-components     # Install shared components to src/components/
  *   node scripts/hub-gen.mjs <hub-root> scaffold               # Generate all Phase 0B scaffold files
- *   node scripts/hub-gen.mjs <hub-root> doctor                 # Run hub-doctor checks (detect + fix)
+ *   node scripts/hub-gen.mjs <hub-root> validate               # Validate all hub files (structural + creative content)
+ *   node scripts/hub-gen.mjs <hub-root> validate --fix         # Validate + auto-fix known issues
  *
  * Options:
  *   --dry-run    Show what would change without writing files
  *   --verbose    Show detailed output
  *   --json       Output results as JSON (for programmatic consumption)
+ *   --fix        (validate only) Auto-fix issues where safe
+ *   --check      (validate only) Exit 1 if issues found (CI mode)
  */
 
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync, statSync, copyFileSync } from 'fs';
@@ -39,8 +42,11 @@ const positional = args.filter(a => !a.startsWith('--'));
 const dryRun = flags.includes('--dry-run');
 const verbose = flags.includes('--verbose');
 const jsonOutput = flags.includes('--json');
+const autoFix = flags.includes('--fix');
+const checkOnly = flags.includes('--check');
+const buildVerify = flags.includes('--build');
 
-const COMMANDS = ['sync-registry', 'add-project', 'write-meta', 'install-components', 'scaffold', 'doctor'];
+const COMMANDS = ['sync-registry', 'add-project', 'write-meta', 'install-components', 'scaffold', 'validate', 'doctor'];
 
 if (positional.length < 2 || !COMMANDS.includes(positional[1])) {
   console.error('Usage: node hub-gen.mjs <hub-root> <command> [args...]');
@@ -51,12 +57,16 @@ if (positional.length < 2 || !COMMANDS.includes(positional[1])) {
   console.error('  write-meta <slug> <json>   Write validated meta.json for a project');
   console.error('  install-components         Install shared components to src/components/');
   console.error('  scaffold                   Generate all Phase 0B scaffold files');
-  console.error('  doctor                     Run hub-doctor checks');
+  console.error('  validate                   Validate all hub files (structural + creative content)');
+  console.error('  doctor                     Alias for validate --fix');
   console.error('');
   console.error('Options:');
   console.error('  --dry-run    Show changes without writing');
   console.error('  --verbose    Detailed output');
   console.error('  --json       JSON output for programmatic use');
+  console.error('  --fix        (validate) Auto-fix issues where safe');
+  console.error('  --check      (validate) Exit 1 if issues found (CI mode)');
+  console.error('  --build      (validate) Run vite build to verify after fixes');
   process.exit(2);
 }
 
@@ -82,6 +92,7 @@ const PATHS = {
   localRegistryFile: join(HUB, 'src/local-projects/index.js'),
   componentsDir: join(HUB, 'src/components'),
   srcDir: join(HUB, 'src'),
+  hubHome: join(HUB, 'src/components/HubHome.jsx'),
 };
 
 // ═══════════════════════════════════════════════════
@@ -719,6 +730,12 @@ function scaffold() {
   // Install shared components
   installComponents();
 
+  // Install ESLint config
+  installEslintConfig();
+
+  // Ensure ESLint devDependencies in package.json
+  ensureEslintDeps();
+
   // Generate registry from config (if config exists)
   if (existsSync(PATHS.hubConfig)) {
     syncRegistry();
@@ -730,27 +747,938 @@ function scaffold() {
 }
 
 // ═══════════════════════════════════════════════════
-//  COMMAND: doctor (delegate to hub-doctor.mjs)
+//  ESLint config generation + dependency management
 // ═══════════════════════════════════════════════════
 
-function doctor() {
-  log('\n── doctor ──');
-  const doctorPath = join(__dirname, 'hub-doctor.mjs');
-  if (!existsSync(doctorPath)) {
-    logError('doctor', `hub-doctor.mjs not found at ${doctorPath}`);
-    finish();
+const ESLINT_DEV_DEPS = {
+  'eslint': '^9',
+  '@eslint/js': '^9',
+  'globals': '^16',
+  'eslint-plugin-react': '^7',
+  'eslint-plugin-react-hooks': '^7',
+  'eslint-plugin-import': '^2',
+  'eslint-plugin-jsx-a11y': '^6',
+  'eslint-plugin-unused-imports': '^4',
+};
+
+function installEslintConfig() {
+  log('\n── install-eslint-config ──');
+  const configPath = join(HUB, 'eslint.config.js');
+  const content = generateEslintConfig();
+  writeFile(configPath, content);
+  logVerbose('Installed eslint.config.js');
+}
+
+function ensureEslintDeps() {
+  const pkgPath = join(HUB, 'package.json');
+  if (!existsSync(pkgPath)) {
+    logWarn('eslint-deps', 'package.json not found — cannot inject ESLint devDependencies');
+    return;
   }
 
-  // Delegate to hub-doctor
-  const doctorArgs = [doctorPath, HUB, ...flags].join(' ');
+  let pkg;
+  try { pkg = JSON.parse(readFileSync(pkgPath, 'utf-8')); } catch {
+    logWarn('eslint-deps', 'Failed to parse package.json');
+    return;
+  }
+
+  if (!pkg.devDependencies) pkg.devDependencies = {};
+
+  let added = 0;
+  for (const [name, version] of Object.entries(ESLINT_DEV_DEPS)) {
+    if (!pkg.devDependencies[name]) {
+      pkg.devDependencies[name] = version;
+      added++;
+    }
+  }
+
+  if (added > 0) {
+    // Sort devDependencies alphabetically for clean diffs
+    const sorted = {};
+    for (const key of Object.keys(pkg.devDependencies).sort()) {
+      sorted[key] = pkg.devDependencies[key];
+    }
+    pkg.devDependencies = sorted;
+
+    writeFile(pkgPath, JSON.stringify(pkg, null, 2) + '\n');
+    logAction('eslint-deps', `Added ${added} ESLint devDependencies to package.json`);
+  } else {
+    logVerbose('ESLint devDependencies already present in package.json');
+  }
+}
+
+function generateEslintConfig() {
+  return `import js from '@eslint/js';
+import globals from 'globals';
+import reactPlugin from 'eslint-plugin-react';
+import reactHooksPlugin from 'eslint-plugin-react-hooks';
+import importPlugin from 'eslint-plugin-import';
+import jsxA11yPlugin from 'eslint-plugin-jsx-a11y';
+import unusedImportsPlugin from 'eslint-plugin-unused-imports';
+
+/**
+ * ESLint flat config for Research Hub projects.
+ * Generated by hub-gen.mjs scaffold — shared across all hub instances.
+ *
+ * Rule rationale is documented inline. Every suppression is intentional.
+ * If you change a rule, update the comment explaining why.
+ */
+export default [
+  js.configs.recommended,
+
+  {
+    files: ['src/**/*.{js,jsx}'],
+    languageOptions: {
+      ecmaVersion: 'latest',
+      sourceType: 'module',
+      globals: {
+        ...globals.browser,
+        ...globals.es2021,
+      },
+      parserOptions: {
+        ecmaFeatures: { jsx: true },
+      },
+    },
+    plugins: {
+      react: reactPlugin,
+      'react-hooks': reactHooksPlugin,
+      import: importPlugin,
+      'jsx-a11y': jsxA11yPlugin,
+      'unused-imports': unusedImportsPlugin,
+    },
+    settings: {
+      react: { version: 'detect' },
+      'import/resolver': {
+        node: { extensions: ['.js', '.jsx'] },
+      },
+    },
+    rules: {
+      // ── Core ──
+      'no-undef': 'error',
+      // Empty catch blocks are valid for graceful degradation (e.g. localStorage).
+      // Other empty blocks (if/for) are still flagged.
+      'no-empty': ['warn', { allowEmptyCatch: true }],
+
+      // ── Unused code ──
+      // Built-in no-unused-vars is OFF — replaced by unused-imports plugin which
+      // provides auto-fix and better destructuring support (ignoreRestSiblings).
+      'no-unused-vars': 'off',
+      // Auto-removes dead imports on --fix.
+      'unused-imports/no-unused-imports': 'warn',
+      // Catches unused vars/args. Prefix with _ to mark intentionally unused.
+      'unused-imports/no-unused-vars': ['warn', {
+        vars: 'all', varsIgnorePattern: '^_', argsIgnorePattern: '^_',
+        ignoreRestSiblings: true,
+      }],
+
+      // ── React ──
+      // Prevents ESLint from false-flagging React/component usage in JSX.
+      'react/jsx-uses-react': 'error',
+      'react/jsx-uses-vars': 'error',
+      // No PropTypes — project uses neither TypeScript nor runtime prop validation.
+      'react/prop-types': 'off',
+      // Content-heavy dashboards have many apostrophes; escaping adds noise.
+      'react/no-unescaped-entities': 'off',
+      // React 17+ JSX transform does not require React in scope.
+      'react/react-in-jsx-scope': 'off',
+
+      // ── React Hooks ──
+      'react-hooks/rules-of-hooks': 'error',
+      'react-hooks/exhaustive-deps': 'warn',
+
+      // ── Imports ──
+      // Resolver cannot follow the hub's relative project paths without extra config.
+      'import/no-unresolved': 'off',
+      'import/named': 'warn',
+
+      // ── Accessibility ──
+      // Interactive dashboard cards use onClick on non-button elements by design.
+      // Core a11y rules remain active; only the noisy dashboard-specific ones are off.
+      'jsx-a11y/click-events-have-key-events': 'off',
+      'jsx-a11y/no-static-element-interactions': 'off',
+      'jsx-a11y/anchor-is-valid': 'off',
+      'jsx-a11y/no-noninteractive-element-interactions': 'off',
+    },
+  },
+
+  {
+    ignores: ['dist/**', 'node_modules/**', 'vite.config.js', 'tailwind.config.js', 'postcss.config.js'],
+  },
+];
+`;
+}
+
+// ═══════════════════════════════════════════════════
+//  COMMAND: validate
+//  Validates all hub files — structural + creative content.
+//  Full validation suite (replaces former hub-doctor.mjs).
+//  --fix enables auto-repair where safe.
+//  --check exits 1 if issues found (CI mode).
+// ═══════════════════════════════════════════════════
+
+// Whether validate should write fixes (--fix flag or doctor alias)
+let canFix = false;
+
+function getProjectDirs(base) {
+  if (!existsSync(base)) return [];
+  return readdirSync(base).filter(d => {
+    const full = join(base, d);
+    return statSync(full).isDirectory() && !d.startsWith('.') && d !== 'node_modules';
+  });
+}
+
+function parseRegistrySlugs(indexPath) {
+  if (!existsSync(indexPath)) return { regSlugs: [], compSlugs: [] };
+  const src = readFileSync(indexPath, 'utf-8');
+  const regSlugs = [];
+  const compSlugs = [];
+  for (const m of src.matchAll(/slug:\s*['"]([^'"]+)['"]/g)) regSlugs.push(m[1]);
+  for (const m of src.matchAll(/['"]([^'"]+)['"]\s*:\s*lazy\s*\(/g)) compSlugs.push(m[1]);
+  return { regSlugs, compSlugs };
+}
+
+function parseRegistryVisibility(indexPath) {
+  if (!existsSync(indexPath)) return {};
+  const src = readFileSync(indexPath, 'utf-8');
+  const map = {};
+  const re = /slug:\s*['"]([^'"]+)['"][\s\S]*?visibility:\s*['"]([^'"]+)['"]/g;
+  let m;
+  while ((m = re.exec(src)) !== null) map[m[1]] = m[2];
+  return map;
+}
+
+function setRegistryVisibility(indexPath, slug, newVis) {
+  if (!existsSync(indexPath)) return false;
+  let src = readFileSync(indexPath, 'utf-8');
+  const pattern = new RegExp(
+    `(slug:\\s*['"]${slug.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}['"][\\s\\S]*?visibility:\\s*['"])([^'"]+)(['"])`,
+  );
+  const match = src.match(pattern);
+  if (!match || match[2] === newVis) return false;
+  src = src.replace(pattern, `$1${newVis}$3`);
+  writeFileSync(indexPath, src);
+  return true;
+}
+
+function validate() {
+  canFix = autoFix || command === 'doctor';
+  const mode = checkOnly ? 'CHECK (CI)' : canFix ? 'DETECT + FIX' : 'DETECT ONLY';
+  log(`\n── validate (${mode}) ──`);
+
+  const config = loadHubConfig();
+  const localConfig = loadLocalConfig();
+
+  // Auto-discover public library path
+  let publicProjectsDir = null;
+  if (localConfig) {
+    const lib = (localConfig.libraries || []).find(l => l.localPath);
+    if (lib) publicProjectsDir = join(resolve(lib.localPath), 'src/projects');
+  }
+
+  // ─── 1. meta.json format + content ───
+  validateMetaJson(PATHS.projectsDir, 'Personal Hub');
+  if (publicProjectsDir && existsSync(publicProjectsDir)) {
+    validateMetaJson(publicProjectsDir, 'Public Library');
+  }
+
+  // ─── 2. Scroll/overflow in project App.jsx ───
+  validateScroll(PATHS.projectsDir, 'Personal Hub');
+  if (publicProjectsDir && existsSync(publicProjectsDir)) {
+    validateScroll(publicProjectsDir, 'Public Library');
+  }
+
+  // ─── 3. Data-component schema mismatches ───
+  validateDataComponentSchema(PATHS.projectsDir, 'Personal Hub');
+  if (publicProjectsDir && existsSync(publicProjectsDir)) {
+    validateDataComponentSchema(publicProjectsDir, 'Public Library');
+  }
+
+  // ─── 4. GlossaryTerm migration (old per-project copies → shared component) ───
+  migrateGlossaryTerm(PATHS.projectsDir);
+  if (publicProjectsDir && existsSync(publicProjectsDir)) {
+    migrateGlossaryTerm(publicProjectsDir);
+  }
+
+  // ─── 5. ESLint code quality (replaces regex import checks) ───
+  validateWithEslint();
+
+  // ─── 6. UI wiring (HubHome.jsx) ───
+  validateUIWiring();
+
+  // ─── 7. Structural checks (registry ↔ config ↔ disk) ───
+  validateStructural(config);
+
+  // ─── 8. Public library structural ───
+  if (publicProjectsDir && existsSync(publicProjectsDir)) {
+    validatePublicLibrary(publicProjectsDir);
+  }
+
+  // ─── 9. Local projects export wiring ───
+  validateLocalProjectsWiring();
+
+  // ─── 10. Library config defaults ───
+  validateLibraryDefaults(config);
+
+  // ─── 11. Cross-hub visibility reconciliation ───
+  validateVisibility(config, localConfig, publicProjectsDir);
+
+  // ─── 12. Build verification (--build flag) ───
+  if (buildVerify) {
+    verifyBuild();
+  }
+
+  logVerbose('Validation complete');
+}
+
+// ─── 1. meta.json format + content ───────────────
+
+const VALIDATE_META_FIELDS = [
+  'durationMinutes', 'skillVersion', 'searchesPerformed', 'sourcesCount',
+  'sectionsBuilt', 'chartsBuilt',
+];
+const VALIDATE_META_NESTED = {
+  hoursSaved: ['totalHoursSaved', 'equivalentLabel'],
+  contentAnalysis: ['fleschKincaidGrade', 'fleschKincaidLabel', 'bloomsLevel', 'bloomsLabel', 'bloomsRange'],
+  consumptionTime: ['estimatedMinutes', 'estimatedLabel'],
+};
+
+function validateMetaJson(projectsDir, label) {
+  log(`\n  ── meta.json (${label}) ──`);
+  const dirs = getProjectDirs(projectsDir);
+
+  for (const slug of dirs) {
+    const metaPath = join(projectsDir, slug, 'meta.json');
+    if (!existsSync(metaPath)) continue;
+
+    let raw;
+    try { raw = JSON.parse(readFileSync(metaPath, 'utf-8')); } catch { continue; }
+
+    let data = raw;
+
+    // Unwrap { telemetry: {...} } wrapper
+    if (raw.telemetry && typeof raw.telemetry === 'object' && !raw.durationMinutes) {
+      data = raw.telemetry;
+      if (canFix && !dryRun) {
+        writeFileSync(metaPath, JSON.stringify(data, null, 2) + '\n');
+        logAction('fix-meta', `${slug}/meta.json — unwrapped telemetry wrapper`);
+      } else {
+        logWarn('meta', `${slug}/meta.json has telemetry wrapper (use --fix to unwrap)`);
+      }
+    }
+
+    // Check content completeness
+    for (const field of VALIDATE_META_FIELDS) {
+      if (data[field] === undefined || data[field] === null) {
+        logWarn('meta', `${slug}/meta.json missing field: ${field}`);
+      }
+    }
+    for (const [parent, children] of Object.entries(VALIDATE_META_NESTED)) {
+      if (!data[parent] || typeof data[parent] !== 'object') {
+        logWarn('meta', `${slug}/meta.json missing block: ${parent}`);
+      } else {
+        for (const child of children) {
+          if (data[parent][child] === undefined || data[parent][child] === null) {
+            logWarn('meta', `${slug}/meta.json missing ${parent}.${child}`);
+          }
+        }
+      }
+    }
+  }
+}
+
+// ─── 2. Scroll/overflow in project App.jsx ───────
+
+function validateScroll(projectsDir, label) {
+  log(`\n  ── Scroll/Overflow (${label}) ──`);
+  const dirs = getProjectDirs(projectsDir);
+
+  for (const slug of dirs) {
+    const appPath = join(projectsDir, slug, 'App.jsx');
+    if (!existsSync(appPath)) continue;
+
+    let src = readFileSync(appPath, 'utf-8');
+    const origSrc = src;
+    const fixes = [];
+    const hasSidebarLayout = /className="flex/.test(src);
+
+    // Root div: min-h-screen → h-full overflow-hidden (sidebar layouts)
+    if (hasSidebarLayout && /className="min-h-screen/.test(src)) {
+      const fixed = src.replace(
+        /className="min-h-screen ([^"]*?)"/,
+        (match, rest) => `className="h-full overflow-hidden ${rest}"`
+      );
+      if (fixed !== src) { src = fixed; fixes.push('root: min-h-screen → h-full overflow-hidden'); }
+    }
+
+    // Sidebar: min-h-screen → h-full overflow-y-auto
+    if (/className="(w-\d+[^"]*?)min-h-screen([^"]*?)sticky top-0/.test(src)) {
+      const fixed = src.replace(
+        /className="(w-\d+[^"]*?)min-h-screen([^"]*?)sticky top-0([^"]*?)"/,
+        (m, b, mid, a) => `className="${b}h-full overflow-y-auto${mid}sticky top-0${a}"`
+      );
+      if (fixed !== src) { src = fixed; fixes.push('sidebar: min-h-screen → h-full overflow-y-auto'); }
+    }
+
+    // Sidebar: sticky top-0 min-h-screen (reversed order)
+    if (/className="(w-\d+[^"]*?)sticky top-0([^"]*?)min-h-screen/.test(src)) {
+      const fixed = src.replace(
+        /className="(w-\d+[^"]*?)sticky top-0([^"]*?)min-h-screen([^"]*?)"/,
+        (m, b, mid, a) => `className="${b}h-full overflow-y-auto${mid}sticky top-0${a}"`
+      );
+      if (fixed !== src) { src = fixed; fixes.push('sidebar: min-h-screen → h-full overflow-y-auto'); }
+    }
+
+    // Main content: flex-1 without overflow-y-auto
+    if (/className="flex-1"/.test(src) && !/className="flex-1[^"]*overflow-y-auto/.test(src)) {
+      const fixed = src.replace(/className="flex-1"/, 'className="flex-1 overflow-y-auto"');
+      if (fixed !== src) { src = fixed; fixes.push('main: added overflow-y-auto to flex-1'); }
+    }
+
+    // Flex wrapper without h-full
+    if (/className="flex"(?!\s+h-full)/.test(src)) {
+      const fixed = src.replace(/className="flex"/, 'className="flex h-full"');
+      if (fixed !== src) { src = fixed; fixes.push('flex wrapper: added h-full'); }
+    }
+
+    if (src !== origSrc) {
+      if (canFix && !dryRun) {
+        writeFileSync(appPath, src);
+        for (const f of fixes) logAction('fix-scroll', `${slug} — ${f}`);
+      } else {
+        for (const f of fixes) logWarn('scroll', `${slug} — ${f}${canFix ? '' : ' (use --fix)'}`);
+      }
+    }
+  }
+}
+
+// ─── 3. Data-component schema mismatches ─────────
+
+function validateDataComponentSchema(projectsDir, label) {
+  log(`\n  ── Data-Component Schema (${label}) ──`);
+  const dirs = getProjectDirs(projectsDir);
+
+  for (const slug of dirs) {
+    const dataPath = join(projectsDir, slug, 'data', 'researchData.js');
+    if (!existsSync(dataPath)) continue;
+
+    const dataSrc = readFileSync(dataPath, 'utf-8');
+
+    // Build map of exportName → Set of top-level keys (multi-line object exports only)
+    const exportShapes = {};
+    for (const m of dataSrc.matchAll(/export const (\w+)\s*=\s*\{\s*\n/g)) {
+      const exportName = m[1];
+      const startIdx = m.index + m[0].length;
+      const block = dataSrc.slice(startIdx, startIdx + 3000);
+      const keys = new Set();
+      for (const km of block.matchAll(/^  (\w+)\s*:/gm)) keys.add(km[1]);
+      exportShapes[exportName] = keys;
+    }
+
+    // Scan component files for .map()/.forEach() on missing keys
+    const compDir = join(projectsDir, slug, 'components');
+    if (!existsSync(compDir)) continue;
+
+    const compFiles = readdirSync(compDir).filter(f => f.endsWith('.jsx') || f.endsWith('.js'));
+
+    for (const compFile of compFiles) {
+      const compPath = join(compDir, compFile);
+      const compSrc = readFileSync(compPath, 'utf-8');
+
+      const importMatch = compSrc.match(/import\s*\{([^}]+)\}\s*from\s*['"]\.\.\/data\/researchData['"]/);
+      if (!importMatch) continue;
+
+      const importedNames = importMatch[1].split(',').map(s => s.trim()).filter(Boolean);
+
+      for (const name of importedNames) {
+        if (!exportShapes[name]) continue;
+        const shape = exportShapes[name];
+
+        for (const am of compSrc.matchAll(new RegExp(`\\b${name}\\.(\\w+)\\s*\\.(?:map|forEach)\\s*\\(`, 'g'))) {
+          const accessedKey = am[1];
+          if (!shape.has(accessedKey)) {
+            if (canFix && !dryRun) {
+              let currentData = readFileSync(dataPath, 'utf-8');
+              const insertLine = `  ${accessedKey}: [],`;
+              const fixedData = currentData.replace(
+                new RegExp(`(export const ${name}\\s*=\\s*\\{\\s*\\n)`),
+                `$1${insertLine}\n`
+              );
+              if (fixedData !== currentData) {
+                writeFileSync(dataPath, fixedData);
+                logAction('fix-data', `${slug} — ${compFile}: ${name}.${accessedKey} missing — added empty array`);
+                shape.add(accessedKey);
+              }
+            } else {
+              logError('data-schema', `${slug} — ${compFile}: ${name}.${accessedKey}.map() but key missing from researchData.js`);
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+// ─── 4. GlossaryTerm migration ────────────────────
+
+function migrateGlossaryTerm(projectsDir) {
+  log('\n  ── GlossaryTerm Migration ──');
+  const dirs = getProjectDirs(projectsDir);
+  const sharedPath = join(PATHS.componentsDir, 'GlossaryTerm.jsx');
+  const sharedExists = existsSync(sharedPath);
+
+  for (const slug of dirs) {
+    const localGT = join(projectsDir, slug, 'components', 'GlossaryTerm.jsx');
+    if (!existsSync(localGT)) continue;
+
+    if (!sharedExists) {
+      logWarn('glossary-migrate', `${slug} has per-project GlossaryTerm but shared component missing — run install-components first`);
+      continue;
+    }
+
+    if (canFix && !dryRun) {
+      // Delete the old per-project copy
+      try { execSync(`rm -f "${localGT}"`, { stdio: 'pipe' }); } catch {}
+
+      // Update imports in all component files in this project
+      const compDir = join(projectsDir, slug, 'components');
+      const compFiles = readdirSync(compDir).filter(f => f.endsWith('.jsx') || f.endsWith('.js'));
+
+      for (const compFile of compFiles) {
+        const compPath = join(compDir, compFile);
+        let src = readFileSync(compPath, 'utf-8');
+        const origSrc = src;
+
+        // Replace relative import with shared component import
+        // From src/projects/<slug>/components/*.jsx → ../../../components/GlossaryTerm
+        src = src.replace(
+          /import\s+GlossaryTerm\s+from\s+['"]\.\/GlossaryTerm['"]\s*;?/,
+          "import { GlossaryTerm } from '../../../components/GlossaryTerm';"
+        );
+        src = src.replace(
+          /import\s+\{\s*GlossaryTerm\s*\}\s+from\s+['"]\.\/GlossaryTerm['"]\s*;?/,
+          "import { GlossaryTerm } from '../../../components/GlossaryTerm';"
+        );
+
+        if (src !== origSrc) {
+          writeFileSync(compPath, src);
+          logAction('glossary-migrate', `${slug}/${compFile} — updated import to shared GlossaryTerm`);
+        }
+      }
+
+      // Also check App.jsx
+      const appPath = join(projectsDir, slug, 'App.jsx');
+      if (existsSync(appPath)) {
+        let appSrc = readFileSync(appPath, 'utf-8');
+        const origApp = appSrc;
+        // From src/projects/<slug>/App.jsx → ../../components/GlossaryTerm
+        appSrc = appSrc.replace(
+          /import\s+GlossaryTerm\s+from\s+['"]\.\/components\/GlossaryTerm['"]\s*;?/,
+          "import { GlossaryTerm } from '../../components/GlossaryTerm';"
+        );
+        if (appSrc !== origApp) {
+          writeFileSync(appPath, appSrc);
+          logAction('glossary-migrate', `${slug}/App.jsx — updated import to shared GlossaryTerm`);
+        }
+      }
+
+      logAction('glossary-migrate', `${slug} — deleted per-project GlossaryTerm, using shared component`);
+    } else {
+      logError('glossary-migrate', `${slug} has per-project GlossaryTerm.jsx (hooks bug) — use --fix to migrate to shared component`);
+    }
+  }
+}
+
+// ─── 5. ESLint code quality checks ───────────────
+
+function validateWithEslint() {
+  log('\n  ── ESLint Code Quality ──');
+
+  const eslintBin = join(HUB, 'node_modules', '.bin', 'eslint');
+  const eslintConfig = join(HUB, 'eslint.config.js');
+
+  if (!existsSync(eslintBin)) {
+    logWarn('eslint', 'ESLint not installed — run npm install in hub to enable code quality checks');
+    logWarn('eslint', 'Run: hub-gen.mjs scaffold to add ESLint deps, then npm install');
+    return;
+  }
+
+  if (!existsSync(eslintConfig)) {
+    logWarn('eslint', 'eslint.config.js not found — run hub-gen.mjs scaffold to generate it');
+    return;
+  }
+
+  // Pass 1: ESLint --fix (removes unused imports, fixes auto-fixable issues)
+  const tmpFile = join(HUB, '.eslint-results.json');
+  runEslint(eslintBin, tmpFile, canFix && !dryRun);
+
+  if (!existsSync(tmpFile)) {
+    logWarn('eslint', 'ESLint did not produce output — check eslint.config.js');
+    return;
+  }
+
+  let results;
+  try { results = JSON.parse(readFileSync(tmpFile, 'utf-8')); } catch {
+    logWarn('eslint', 'Failed to parse ESLint results');
+    return;
+  }
+
+  // Count what ESLint --fix handled
+  let eslintFixedCount = 0;
+  for (const f of results) { if (f.output !== undefined) eslintFixedCount++; }
+  if (eslintFixedCount > 0) logAction('eslint-fix', `ESLint auto-fixed ${eslintFixedCount} files`);
+
+  // Note: unused-imports/no-unused-vars warnings are reported but NOT auto-fixed.
+  // Removing variable declarations requires AST-based transformation (jscodeshift)
+  // to be safe. SKILL.md instructs the AI to resolve these warnings after validate --fix.
+  // Future: WXSA-19286 tracks adding jscodeshift for proper AST-based auto-fix.
+
+  // Report remaining issues
+  reportEslintResults(results);
+
+  // Clean up
+  try { execSync(`rm -f "${tmpFile}"`, { stdio: 'pipe' }); } catch {}
+}
+
+function runEslint(eslintBin, outputFile, fix) {
+  const args = [
+    eslintBin, 'src/',
+    '--format', 'json',
+    '--no-error-on-unmatched-pattern',
+    '--output-file', outputFile,
+  ];
+  if (fix) args.push('--fix');
+
   try {
-    const output = execSync(`node ${doctorArgs}`, { encoding: 'utf-8', stdio: 'pipe' });
-    log(output);
-    logAction('doctor', 'Hub doctor completed');
+    execSync(args.join(' '), {
+      cwd: HUB, encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+      timeout: 120000,
+    });
+  } catch {
+    // ESLint exits non-zero when issues found — results are in the file
+  }
+}
+
+function reportEslintResults(eslintResults) {
+  let errorCount = 0;
+  let warnCount = 0;
+  const errorsByRule = {};
+  const warnsByRule = {};
+
+  for (const file of eslintResults) {
+    const relPath = file.filePath.replace(HUB + '/', '');
+    for (const msg of (file.messages || [])) {
+      const loc = `${relPath}:${msg.line}:${msg.column}`;
+      const detail = `${loc} — ${msg.ruleId}: ${msg.message}`;
+
+      if (msg.severity === 2) {
+        errorsByRule[msg.ruleId] = (errorsByRule[msg.ruleId] || 0) + 1;
+        if (verbose) logError('eslint', detail);
+        errorCount++;
+      } else if (msg.severity === 1) {
+        warnsByRule[msg.ruleId] = (warnsByRule[msg.ruleId] || 0) + 1;
+        if (verbose) logWarn('eslint', detail);
+        warnCount++;
+      }
+    }
+  }
+
+  if (errorCount > 0 && !verbose) {
+    const breakdown = Object.entries(errorsByRule).map(([r, c]) => `${c}× ${r}`).join(', ');
+    logError('eslint', `${errorCount} errors (${breakdown}) — use --verbose to see details`);
+  }
+
+  if (warnCount > 0 && !verbose) {
+    const breakdown = Object.entries(warnsByRule).map(([r, c]) => `${c}× ${r}`).join(', ');
+    logWarn('eslint', `${warnCount} warnings (${breakdown}) — resolve unused vars in source files`);
+  }
+
+  if (errorCount === 0 && warnCount === 0) {
+    log('  ✅ ESLint: all files pass');
+  }
+}
+
+// ─── 5. UI wiring (HubHome.jsx) ─────────────────
+
+function validateUIWiring() {
+  log('\n  ── UI Wiring (HubHome.jsx) ──');
+  if (!existsSync(PATHS.hubHome)) {
+    logVerbose('HubHome.jsx not found — skipping UI wiring checks');
+    return;
+  }
+
+  const src = readFileSync(PATHS.hubHome, 'utf-8');
+
+  // Positive checks — things that should be present
+  const checks = [
+    [/import ProjectDetailFlyout/, 'ProjectDetailFlyout import'],
+    [/import CompareView/, 'CompareView import'],
+    [/ChevronRight/, 'ChevronRight icon import'],
+    [/onDetailClick/, 'onDetailClick prop/handler'],
+    [/onCompareToggle/, 'onCompareToggle prop/handler'],
+    [/project\.telemetry/, 'telemetry inline fallback for local projects'],
+    [/<ProjectDetailFlyout/, 'ProjectDetailFlyout overlay rendered'],
+    [/<CompareView/, 'CompareView overlay rendered'],
+    [/compareCount/, 'compare count logic'],
+  ];
+
+  // Negative checks — things that should NOT be present
+  const negChecks = [
+    [/VisibilitySelector/, 'VisibilitySelector component (removed — visibility is config-only)'],
+    [/onVisibilityChange/, 'onVisibilityChange prop/handler (removed)'],
+    [/visibilityOverrides/, 'visibilityOverrides state (removed)'],
+  ];
+
+  let allGood = true;
+  for (const [regex, label] of checks) {
+    if (!regex.test(src)) {
+      logWarn('ui-wiring', `HubHome.jsx missing: ${label}`);
+      allGood = false;
+    }
+  }
+  for (const [regex, label] of negChecks) {
+    if (regex.test(src)) {
+      logWarn('ui-wiring', `HubHome.jsx has: ${label}`);
+      allGood = false;
+    }
+  }
+  if (allGood) logVerbose('HubHome.jsx UI wiring is complete');
+}
+
+// ─── 6. Structural checks ───────────────────────
+
+function validateStructural(config) {
+  log('\n  ── Structural (registry ↔ config ↔ disk) ──');
+  const { regSlugs, compSlugs } = parseRegistrySlugs(PATHS.registryFile);
+
+  // Registry ↔ Components sync
+  for (const slug of regSlugs) {
+    if (!compSlugs.includes(slug)) logError('struct', `${slug} in registry but missing from projectComponents`);
+  }
+
+  // Registry ↔ Directory sync
+  for (const slug of regSlugs) {
+    if (!existsSync(join(PATHS.projectsDir, slug))) logError('struct', `${slug} in registry but directory missing`);
+  }
+
+  // Missing App.jsx
+  for (const slug of regSlugs) {
+    if (!existsSync(join(PATHS.projectsDir, slug, 'App.jsx'))) logError('struct', `${slug} missing App.jsx`);
+  }
+
+  // hub-config.json ↔ index.js sync
+  const configSlugs = (config.projects || []).map(p => p.slug);
+  for (const slug of configSlugs) {
+    if (!regSlugs.includes(slug)) logError('struct', `${slug} in hub-config.json but not in index.js`);
+  }
+  for (const slug of regSlugs) {
+    if (!configSlugs.includes(slug)) logError('struct', `${slug} in index.js but not in hub-config.json`);
+  }
+
+  // Missing query/subtitle
+  for (const p of config.projects || []) {
+    if (!p.query) logWarn('struct', `${p.slug} missing query field in hub-config.json`);
+    if (!p.subtitle) logWarn('struct', `${p.slug} missing subtitle field in hub-config.json`);
+  }
+
+  // Orphan directories
+  const dirs = getProjectDirs(PATHS.projectsDir);
+  for (const dir of dirs) {
+    if (!regSlugs.includes(dir)) logWarn('orphan', `${dir}/ exists on disk but not in index.js`);
+  }
+}
+
+// ─── 7. Public library structural ────────────────
+
+function validatePublicLibrary(publicProjectsDir) {
+  log('\n  ── Public Library Structural ──');
+  const { regSlugs, compSlugs } = parseRegistrySlugs(join(publicProjectsDir, 'index.js'));
+  for (const slug of regSlugs) {
+    if (!compSlugs.includes(slug)) logError('pub-struct', `${slug} in registry but missing from projectComponents`);
+  }
+  const dirs = getProjectDirs(publicProjectsDir);
+  for (const dir of dirs) {
+    if (!regSlugs.includes(dir)) logWarn('pub-orphan', `${dir}/ exists on disk but not in public index.js`);
+  }
+}
+
+// ─── 8. Local projects export wiring ─────────────
+
+function validateLocalProjectsWiring() {
+  const localIndex = join(PATHS.localProjectsDir, 'index.js');
+  if (!existsSync(localIndex)) return;
+
+  log('\n  ── Local Projects Wiring ──');
+  let src = readFileSync(localIndex, 'utf-8');
+
+  if (src.includes('localProjectRegistry') && !src.includes('export const projectRegistry')) {
+    if (canFix && !dryRun) {
+      src = src.replace(/\blocalProjectRegistry\b/g, 'projectRegistry');
+      writeFileSync(localIndex, src);
+      logAction('fix-local', 'local-projects/index.js: renamed localProjectRegistry → projectRegistry');
+    } else {
+      logError('local-wire', 'local-projects/index.js uses localProjectRegistry instead of projectRegistry');
+    }
+  }
+
+  if (src.includes('localProjectComponents') && !src.includes('export const projectComponents')) {
+    if (canFix && !dryRun) {
+      src = src.replace(/\blocalProjectComponents\b/g, 'projectComponents');
+      writeFileSync(localIndex, src);
+      logAction('fix-local', 'local-projects/index.js: renamed localProjectComponents → projectComponents');
+    } else {
+      logError('local-wire', 'local-projects/index.js uses localProjectComponents instead of projectComponents');
+    }
+  }
+}
+
+// ─── 9. Library config defaults ──────────────────
+
+function validateLibraryDefaults(config) {
+  log('\n  ── Library Config Defaults ──');
+
+  for (const lib of (config.libraries || [])) {
+    if (lib.confirmEachShare === false) {
+      if (canFix && !dryRun) {
+        lib.confirmEachShare = true;
+        writeFileSync(PATHS.hubConfig, JSON.stringify(config, null, 2) + '\n');
+        logAction('fix-lib', `${lib.name}: confirmEachShare was false — set to true`);
+      } else {
+        logWarn('lib-default', `${lib.name}: confirmEachShare is false — should be true`);
+      }
+    }
+  }
+}
+
+// ─── 10. Cross-hub visibility reconciliation ─────
+
+function validateVisibility(config, localConfig, publicProjectsDir) {
+  log('\n  ── Visibility Reconciliation ──');
+
+  const gitUsername = (config.libraries || []).find(l => l.gitUsername)?.gitUsername || null;
+  const configProjects = config.projects || [];
+  const configVisMap = {};
+  for (const p of configProjects) configVisMap[p.slug] = p.visibility || 'personal';
+
+  const indexVisMap = parseRegistryVisibility(PATHS.registryFile);
+
+  // Build local project slug set
+  const localSlugs = new Set();
+  if (localConfig) {
+    for (const p of (localConfig.localProjects || [])) localSlugs.add(p.slug);
+  }
+  const localDirs = existsSync(PATHS.localProjectsDir) ? getProjectDirs(PATHS.localProjectsDir) : [];
+  for (const d of localDirs) localSlugs.add(d);
+
+  // Local tier integrity
+  for (const slug of localSlugs) {
+    if (configVisMap[slug]) {
+      logError('vis-local', `${slug} is a local project but appears in hub-config.json projects[]`);
+    }
+    if (indexVisMap[slug]) {
+      logError('vis-local', `${slug} is a local project but appears in src/projects/index.js`);
+    }
+  }
+  for (const [slug, vis] of Object.entries(configVisMap)) {
+    if (vis === 'local') {
+      logError('vis-local', `${slug} has visibility 'local' in hub-config.json — should not be there`);
+    }
+  }
+
+  // Config ↔ Registry visibility sync
+  for (const slug of Object.keys(configVisMap)) {
+    const configVis = configVisMap[slug];
+    const indexVis = indexVisMap[slug];
+    if (indexVis && configVis !== indexVis) {
+      if (canFix && !dryRun) {
+        setRegistryVisibility(PATHS.registryFile, slug, configVis);
+        logAction('fix-vis', `${slug}: index.js had '${indexVis}', config has '${configVis}' — synced`);
+      } else {
+        logError('vis-sync', `${slug}: index.js has '${indexVis}' but config has '${configVis}'`);
+      }
+    }
+  }
+
+  // Public library cross-checks
+  if (!publicProjectsDir || !existsSync(publicProjectsDir) || !gitUsername) return;
+
+  const suffix = `-${gitUsername}`;
+  const publicIndexPath = join(publicProjectsDir, 'index.js');
+  const { regSlugs: publicSlugs } = parseRegistrySlugs(publicIndexPath);
+
+  const publicPersonalSlugs = new Set();
+  for (const pubSlug of publicSlugs) {
+    if (pubSlug.endsWith(suffix)) publicPersonalSlugs.add(pubSlug.slice(0, -suffix.length));
+  }
+
+  // Projects in public library but marked personal in personal hub
+  for (const slug of publicPersonalSlugs) {
+    if (localSlugs.has(slug)) {
+      logError('vis-local', `${slug} is local but exists in public library as ${slug}${suffix}`);
+      continue;
+    }
+    const configVis = configVisMap[slug];
+    if (!configVis) {
+      logWarn('vis', `${slug}${suffix} in public library but ${slug} not in hub-config.json`);
+      continue;
+    }
+    if (configVis !== 'public') {
+      if (canFix && !dryRun) {
+        const proj = configProjects.find(p => p.slug === slug);
+        if (proj) {
+          proj.visibility = 'public';
+          writeFileSync(PATHS.hubConfig, JSON.stringify(config, null, 2) + '\n');
+        }
+        setRegistryVisibility(PATHS.registryFile, slug, 'public');
+        logAction('fix-vis', `${slug}: in public library — upgraded to 'public'`);
+        configVisMap[slug] = 'public';
+      } else {
+        logError('vis', `${slug}: in public library but personal hub has visibility '${configVis}'`);
+      }
+    }
+  }
+
+  // Projects marked public but missing from public library
+  for (const [slug, vis] of Object.entries(configVisMap)) {
+    if (vis === 'public') {
+      const expectedPubSlug = `${slug}${suffix}`;
+      if (!publicSlugs.includes(expectedPubSlug)) {
+        logWarn('vis', `${slug} is 'public' but ${expectedPubSlug} not found in public library`);
+      }
+    }
+  }
+}
+
+// ─── 12. Build verification ──────────────────────
+
+function verifyBuild() {
+  log('\n  ── Build Verification ──');
+
+  const viteBin = join(HUB, 'node_modules', '.bin', 'vite');
+  if (!existsSync(viteBin)) {
+    logWarn('build', 'Vite not installed — cannot verify build');
+    return;
+  }
+
+  log('  Building hub with vite build...');
+  try {
+    execSync(`${viteBin} build`, {
+      cwd: HUB,
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+      timeout: 120000,
+    });
+    log('  ✅ Build: vite build succeeded');
   } catch (e) {
-    log(e.stdout || '');
-    log(e.stderr || '');
-    logError('doctor', `Hub doctor exited with code ${e.status}`);
+    const stderr = (e.stderr || '').trim();
+    // Extract the key error lines from vite build output
+    const errorLines = stderr.split('\n').filter(l =>
+      l.includes('error') || l.includes('Error') || l.includes('✘')
+    ).slice(0, 10);
+    logError('build', 'vite build FAILED');
+    for (const line of errorLines) {
+      logError('build', line.trim());
+    }
   }
 }
 
@@ -780,8 +1708,12 @@ switch (command) {
   case 'scaffold':
     scaffold();
     break;
+  case 'validate':
+    validate();
+    break;
   case 'doctor':
-    doctor();
+    // doctor is an alias for validate --fix
+    validate();
     break;
   default:
     logError('dispatch', `Unknown command: ${command}`);

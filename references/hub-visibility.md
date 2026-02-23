@@ -79,7 +79,7 @@ The visibility tier is shown as a **read-only badge** on every project card in t
 **Visibility is config-only.** There is no UI to change visibility. The badge is informational. Visibility is set by:
 - The skill during Phase 6 (based on Phase 3D contribution intent)
 - Direct edits to `hub-config.json` or `.local-config.json`
-- The `hub-doctor` script (`scripts/hub-doctor.mjs <hub-root>`) for reconciliation fixes
+- The `hub-gen` script (`scripts/hub-gen.mjs validate --fix`) for reconciliation fixes
 
 ## Collection Visibility
 
