@@ -12,7 +12,7 @@ license: MIT
 compatibility: Requires internet access for web search and data fetching.
 metadata:
   author: mrshaun13
-  version: "7.2.2"
+  version: "8.0"
 ---
 
 # Deep Research → Interactive Dashboard Pipeline
@@ -114,16 +114,17 @@ This runs ONCE per machine. The goal is to either clone an existing personal hub
 #### Phase 0B-SCAFFOLD: Create Fresh Hub
 
 1. **Ask for hub location:** Default: `~/git/personal-research-hub/`
-2. **Scaffold the hub app** — copy every file verbatim from [hub-scaffold-templates.md](references/hub-scaffold-templates.md). The `vite.config.js` template reads from `.local-config.json` dynamically (no hardcoded paths).
-3. **Run `npm install`**
-4. **Initialize git repo:** `git init`, `git branch -m main`, `.gitignore` (node_modules/, dist/, .DS_Store, *.local, .local-config.json). Ask about connecting a remote — if provided, push; if skipped, local only.
-5. **Create `hub-config.json`** in the hub directory — set `version: "3.0"`, `port: 5180`, `gitRepo` (or null), empty `libraries` array, empty `projects` array, empty `collections` array.
-6. **Create pointer config** at `~/.codeium/windsurf/skills/research-visualizer/config.json`:
+2. **Create the hub directory** and copy scaffold files verbatim from [hub-scaffold-templates.md](assets/hub-scaffold-templates.md): `package.json`, `vite.config.js`, `tailwind.config.js`, `postcss.config.js`, `index.html`, `src/main.jsx`, `src/index.css`, `src/App.jsx`.
+3. **Create `hub-config.json`** in the hub directory — set `version: "3.0"`, `frameworkVersion: "8.0"`, `port: 5180`, `gitRepo` (or null), empty `libraries` array, empty `projects` array, empty `collections` array.
+4. **Run `node scripts/hub-gen.mjs <hub-path> scaffold`** — this generates: shared components (`GlossaryTerm`, `CustomTooltip`, `InsightCallout`), ESLint config, devDependencies, project registry, and stamps `frameworkVersion` in hub-config.json.
+5. **Run `npm install`** in the hub directory.
+6. **Initialize git repo:** `git init`, `git branch -m main`, `.gitignore` (node_modules/, dist/, .DS_Store, *.local, .local-config.json). Ask about connecting a remote — if provided, push; if skipped, local only.
+7. **Create pointer config** at `~/.codeium/windsurf/skills/research-visualizer/config.json`:
    ```json
    { "personalHubPath": "<chosen-path>" }
    ```
-7. **Create empty `.local-config.json`** in the hub directory: `{ "libraries": [] }`
-8. **Continue to Phase 0B-LIBRARIES.**
+8. **Create empty `.local-config.json`** in the hub directory: `{ "libraries": [] }`
+9. **Continue to Phase 0B-LIBRARIES.**
 
 ### Phase 0B-LIBRARIES: Library Setup (One-Time Per Library)
 
@@ -159,26 +160,11 @@ For each library the user wants to add (start with the default Community Researc
 
 8. **Continue to Phase 1** (or stop here if no topic was provided).
 
-### Backwards Compatibility
+### Key Principles
 
-The skill works with **any combination** of these features:
-
-| Personal Git Repo | Libraries | Contribution | What Works |
-|---|---|---|---|
-| ✗ | ✗ | ✗ | Local-only research. No sync, no browsing, no sharing. Fully functional. |
-| ✓ | ✗ | ✗ | Personal research syncs across machines via git. No public library. |
-| ✗ | ✓ (browse) | ✗ | Browse community research. Personal research is local-only. |
-| ✓ | ✓ (browse) | ✗ | Full sync + browse community. No contributions. |
-| ✗ | ✓ (browse) | ✓ | Browse + contribute. No personal git sync. Agent uses GitHub API to contribute (no local git needed). |
-| ✓ | ✓ (browse) | ✓ | Full experience: sync, browse, contribute. |
-
-**Key principle:** No feature depends on another. A user with zero GitHub setup gets a fully functional local research hub.
-
-**Telemetry:** Initialize the telemetry object at the start of Phase 0. See [hub-architecture.md](references/hub-architecture.md#telemetry-schema) for the complete schema, capture timing, and formulas.
-
-### Key Principle
-
-Phase 0 should be **fast**. If the hub exists, it's a 2-second check (read pointer → read hub-config → git pull → go). If it's first-time, the setup conversation is brief and then research proceeds normally.
+- **No feature depends on another.** A user with zero GitHub setup gets a fully functional local research hub. Git sync, library browsing, and contribution are all independently optional.
+- **Phase 0 should be fast.** If the hub exists, it's a 2-second check (read pointer → read hub-config → git pull → go). If it's first-time, the setup conversation is brief and then research proceeds normally.
+- **Telemetry:** Initialize the telemetry object at the start of Phase 0. See [hub-architecture.md](references/hub-architecture.md#telemetry-schema) for the complete schema, capture timing, and formulas.
 
 ---
 
@@ -377,36 +363,31 @@ Each section: title + subtitle + 1-3 chart cards + insight callout + filters whe
 All outputs are built into the Research Hub — a single web application that hosts all research dashboards and collections. **Never create a standalone Vite project.** The hub was set up in Phase 0.
 
 See [hub-architecture.md](references/hub-architecture.md) for the hub directory structure, config schema, and project registry format.
-See [build-templates.md](references/build-templates.md) for data schemas, component patterns, and design principles.
+See [build-templates.md](assets/build-templates.md) for data schemas, component patterns, and design principles.
 See [collections-architecture.md](references/collections-architecture.md) for template-mode collection structure and rendering.
 
 ### Output Mode: Bespoke (default)
 
-Standard pipeline — each run produces a unique React project.
+Standard pipeline — each run produces a unique React project. **hub-gen.mjs handles all structural work; the AI writes only creative content (section components and data files).**
 
 #### Steps:
 
 1. **Read pointer config** (`~/.codeium/windsurf/skills/research-visualizer/config.json`) to get `personalHubPath`
 2. **Read `hub-config.json`** from `<personalHubPath>/hub-config.json` for port and project list
 3. **Generate a slug** for the new project (kebab-case from topic, e.g., "cisco-history-dashboard")
-4. **Create project directory** based on visibility:
-   - `"personal"` or `"public"`: `<personalHubPath>/src/projects/<slug>/`
-   - `"local"`: `<personalHubPath>/src/local-projects/<slug>/` (create `src/local-projects/` if it doesn't exist)
-5. **Write project files** into that directory:
-   - `App.jsx` — the project's own App component with internal sidebar nav, section routing, filter controls
-   - `components/` — all section components (Overview, Sources, etc.)
-   - `data/` — all data files as ES module exports
-6. **Update the project registry** based on visibility:
-   - `"personal"` or `"public"`: Update `<personalHubPath>/src/projects/index.js` — add lazy import + lightweight metadata entry (slug, title, subtitle, query, lens, icon, accentColor, visibility, createdAt only — **no telemetry**)
-   - `"local"`: Update `<personalHubPath>/src/local-projects/index.js` — same lightweight format (create the file if it doesn't exist)
-7. **Update config** based on visibility:
-   - `"personal"` or `"public"`: Add the project to `hub-config.json` `projects` array with lightweight metadata + original user query + `visibility` field — **no telemetry** (telemetry goes in `meta.json` only)
-   - `"local"`: Add the project to `.local-config.json` `localProjects` array with the same lightweight schema + `visibility: "local"`
-   - See [Visibility Tiers](references/hub-visibility.md#the-three-tiers).
-8. **Check dev server status:**
+4. **Run `node scripts/hub-gen.mjs <hub-path> add-project --json '<payload>'`** with a JSON payload containing: `slug`, `title`, `subtitle`, `query`, `lens`, `icon`, `accentColor`, `visibility`, `createdAt`, `sections` (array of section names like `["Overview", "Demographics", "Trends", "Sources"]`).
+   - This single command: creates the project directory + `components/` + `data/`, generates the `App.jsx` shell with sidebar nav and section routing, updates `hub-config.json`, and regenerates the project registry — all in ~2 seconds.
+   - Parse the `--json` output for `createdPaths` to know where to write creative content.
+   - See [Visibility Tiers](references/hub-visibility.md#the-three-tiers) for visibility rules.
+5. **AI writes creative content** into the project directory:
+   - `components/*.jsx` — section components with charts, data visualizations, insight callouts. Import shared components from `../../components/` (e.g., `import CustomTooltip from '../../components/CustomTooltip'`, `import InsightCallout from '../../components/InsightCallout'`).
+   - `data/*.js` — research data as ES module exports.
+   - This is the **only part where AI generation time is spent**.
+6. **Run `node scripts/hub-gen.mjs <hub-path> install-components`** — ensures shared `GlossaryTerm`, `CustomTooltip`, `InsightCallout` are in `src/components/`.
+7. **Check dev server status:**
    - If Vite is already running on the hub port → tell user to refresh their browser (Vite HMR will pick up new files)
    - If Vite is NOT running → start it from `<personalHubPath>`: `npm run dev`
-9. **Open browser preview** on the hub's port
+8. **Open browser preview** on the hub's port
 
 **Extension hook (augment):** If an extension is active, load its Phase 6 instructions for domain-specific file structure, component patterns, and build order.
 
@@ -414,16 +395,19 @@ Standard pipeline — each run produces a unique React project.
 
 ```
 <hubPath>/src/projects/<slug>/
-├── App.jsx                    # Project's own App with internal sidebar nav + section routing
-├── meta.json                  # Telemetry + run metadata (written in Phase 7 step 4)
+├── App.jsx                    # Generated by hub-gen.mjs add-project (do not write manually)
+├── meta.json                  # Telemetry + run metadata (written by hub-gen.mjs write-meta in Phase 7)
 ├── components/
-│   ├── CustomTooltip.jsx      # Dark-themed chart tooltips
-│   ├── InsightCallout.jsx     # Colored callout boxes
-│   ├── Overview.jsx           # Overview section
-│   ├── [SectionName].jsx      # Additional sections
-│   └── Sources.jsx            # Methodology, disclaimers
+│   ├── Overview.jsx           # AI-written section component
+│   ├── [SectionName].jsx      # AI-written additional sections
+│   └── Sources.jsx            # AI-written methodology, disclaimers
 └── data/
-    └── researchData.js        # All research data as ES module exports
+    └── researchData.js        # AI-written research data as ES module exports
+
+<hubPath>/src/components/       # Shared components (installed by hub-gen.mjs install-components)
+├── GlossaryTerm.jsx           # Inline term flyout — import from '../../components/GlossaryTerm'
+├── CustomTooltip.jsx          # Dark-themed chart tooltips — import from '../../components/CustomTooltip'
+└── InsightCallout.jsx         # Colored callout boxes — import from '../../components/InsightCallout'
 ```
 
 ### Output Mode: Template (extension-driven)
@@ -454,96 +438,60 @@ After the dashboard is built, scan all user-facing text content (section titles,
 
 This step is **enabled by default** (`glossaryEnrichment: true` in `hub-config.json`). If the user sets `glossaryEnrichment: false`, skip this phase entirely and record `glossary.enabled: false` in telemetry.
 
-### Density Rules
+### Density & Selection Rules
 
-Term count scales with the amount of explanatory text in the project — text-heavy dashboards get more terms, visual-heavy dashboards get fewer.
+**Formula:** `terms = max(3, floor(explanatoryWordCount / 250))` — scales with text volume. Max 2 per section. Never two in the same sentence.
 
-**Formula:** `terms = max(3, floor(explanatoryWordCount / 250))`
-
-- **Explanatory text** = overview paragraphs, insight callout text, section subtitles, prose descriptions. Does NOT include chart data, axis labels, data tables, or code snippets.
-- **Floor of 3** — every project gets at least 3 terms so the feature always adds value.
-- **No hard ceiling** — a 5,000-word deep dive naturally gets ~20 terms; a mostly-visual dashboard with 600 words of prose gets 3.
-
-| Rule | Value | Rationale |
-|---|---|---|
-| **Terms per project** | `max(3, floor(words / 250))` | Scales with text volume — more prose means more terms to discover |
-| **Maximum per section** | 2 terms | Prevents tooltip fatigue within a single view |
-| **No stacking** | Never two terms in the same sentence | Pick the more obscure one if both qualify |
-
-### Term Selection Criteria
-
-Identify terms using this priority order (highest first):
-
-1. **Acronyms & initialisms** — SDK, API, CAGR, TCO, HVAC, OEM (unless already expanded inline)
-2. **Domain jargon** — terms specific to the research field that a non-specialist wouldn't know (e.g., "loss aversion", "herd immunity", "basis points")
-3. **Technical concepts** — methodological or scientific terms used in findings (e.g., "confidence interval", "regression to the mean")
-4. **Tribal knowledge** — industry-insider terms that assume context (e.g., "greenfield", "dogfooding", "technical debt")
-
-**Skip:** Common words a high-school graduate would know, terms already defined in the surrounding text, proper nouns (brand names, people), and units of measurement.
+**Selection priority (highest first):** Acronyms/initialisms → Domain jargon → Technical concepts → Tribal knowledge. Skip common words, terms already defined inline, proper nouns, and units of measurement.
 
 ### Steps
 
 1. **Scan all text content** in the built project — overview paragraphs, insight callout text, section subtitles, chart axis labels, and any prose in data files.
-2. **Identify candidate terms** using the selection criteria above. Rank by obscurity (how likely a general reader is to not know the term).
-3. **Apply density rules** — select the top-ranked terms within the floor/ceiling bounds. Distribute across sections (prefer at least 1 term in the first section the user sees).
-4. **Generate for each selected term:**
-   - **Definition** (1-2 sentences): Plain-language explanation. No jargon in the definition itself.
-   - **Research prompt**: A complete, copy-paste-ready prompt for the research-visualizer skill to launch a new research project on that term/concept. Format: *"Research [term]: [expanded topic framing that would produce a rich dashboard]"*
-5. **Create `glossaryTerms.js`** in the project's `data/` directory:
-   ```javascript
-   export const glossaryTerms = {
-     "SDK": {
-       definition: "Software Development Kit — a collection of tools, libraries, and documentation that developers use as a starting point to build applications for a specific platform or service.",
-       researchPrompt: "Research software development kits: how SDKs have evolved from early platform toolkits to modern cloud-native frameworks, their impact on developer productivity, adoption patterns across industries, and how open-source vs proprietary SDKs shape technology ecosystems"
-     },
-     // ... more terms
-   };
-   ```
-6. **Add `GlossaryTerm.jsx`** to the project's `components/` directory. See [build-templates.md](references/build-templates.md#glossaryterm-component) for the component specification.
-7. **Wrap identified terms** in existing section components with `<GlossaryTerm term="SDK">SDK</GlossaryTerm>`. Import `glossaryTerms` data and the component in each section file that contains glossed terms.
+2. **Identify and rank candidate terms** by obscurity. Apply density rules — select top-ranked terms within bounds. Distribute across sections (prefer at least 1 in the first section).
+3. **Generate for each selected term:** a plain-language **definition** (1-2 sentences, no jargon) and a **research prompt** (copy-paste-ready prompt for the skill: *"Research [term]: [expanded framing]"*).
+4. **Create `data/glossaryTerms.js`** — export a `glossaryTerms` object mapping each term to `{ definition, researchPrompt }`.
+5. **Wrap terms** in section components using the **shared** `GlossaryTerm` (installed by `install-components` — do NOT create a per-project copy). Import: `import { GlossaryTerm } from '../../components/GlossaryTerm'` and `import { glossaryTerms } from '../data/glossaryTerms'`. Usage: `<GlossaryTerm term="SDK" glossary={glossaryTerms}>SDK</GlossaryTerm>`.
 
-### GlossaryTerm UX
-
-- **Idle state:** Subtle dotted underline (not solid — distinguishes from hyperlinks). Uses the project's accent color at 40% opacity.
-- **Hover state:** Underline becomes solid, slight background highlight.
-- **Click/tap:** Opens a compact flyout card anchored below the term:
-  - **Term** in bold at top
-  - **Definition** (1-2 sentences) in normal text
-  - **Label:** "Deep dive with Research Visualizer:" in small uppercase gray text
-  - **Prompt box** — a dark rounded container (like GitHub's clone URL box) showing the full research prompt in monospace text with a clipboard copy button on the right. The prompt is **always visible** — the user can read it, understand what it does, and optionally copy it. On copy, the clipboard icon swaps to a checkmark for 2s.
-- **Dismiss:** Click outside the flyout, press Escape, or click another glossary term.
-- **Mobile:** Flyout becomes a bottom sheet on small screens.
-- **Positioning:** Flyout auto-positions to stay within viewport (flip above if near bottom edge).
-
-See [build-templates.md](references/build-templates.md#glossaryterm-component) for the complete component specification and styling details.
+See [build-templates.md](assets/build-templates.md#glossaryterm-component) for the full GlossaryTerm UX spec, data schema, and component props.
 
 ---
 
 ## Phase 7: PRESENT — Polish, Validate, Deliver
 
-**Ordering is critical.** Steps 1-4 must complete before steps 5-8 begin. The hub is rendered ONCE at the end, after all syncs are done, so the user sees their research in both their personal space and the public library.
+**Ordering is critical.** Steps 1-5 must complete before steps 6-9 begin. The hub is rendered ONCE at the end, after all syncs are done, so the user sees their research in both their personal space and the public library.
 
-1. **Build test:** Run `npx vite build` from the hub directory — must complete with zero errors
-2. **QA:** Charts render, axis labels visible, tooltips correct, findings match data, citations complete, T4 estimates marked
-3. **Extension QA:** If an extension is active, load its Phase 7 instructions for domain-specific QA checks.
+1. **Run `node scripts/hub-gen.mjs <hub-path> validate --fix --build --json`** — runs all 12 validation categories + vite build. Auto-fixes: unused imports, scroll classes, registry sync, telemetry wrapper unwrap, orphaned GlossaryTerm imports. Parse `--json` output: check `summary.passed` and `summary.totalErrors`.
+2. **Review validate output:** If errors remain after `--fix`, resolve manually (common: unused vars ESLint can't auto-remove, missing data keys).
+3. **QA:** Charts render, axis labels visible, tooltips correct, findings match data, citations complete, T4 estimates marked.
+4. **Extension QA:** If an extension is active, load its Phase 7 instructions for domain-specific QA checks.
 
-4. **Finalize telemetry — GATE (steps 5-8 MUST NOT run until this is done):**
-   Compute ALL telemetry fields from [hub-architecture.md](references/hub-architecture.md#telemetry-schema) and persist to the project's `meta.json` file at `<hubPath>/src/projects/<slug>/meta.json` (or `src/local-projects/<slug>/meta.json` for local projects). This includes: `runStartedAt`, `runCompletedAt`, `durationMinutes`, `skillVersion`, `userPrompt`, `researchPlan`, `checkpointModified`, `searchesPerformed`, `sourcesCount`, `sectionsBuilt`, `chartsBuilt`, `filesGenerated`, `dataPointsCollected`, `phaseTiming` (all 9 phases including `enrich`), `glossary` (enabled, termsIdentified, termsRendered, termsByCategory), `contentAnalysis` (FK grade, Bloom's, word count), `hoursSaved` (using formulas from hub-architecture.md), `consumptionTime`, and optional quality fields: `dataQualityDistribution` (T1-T4 counts), `sourceDiversityScore`, `promptComplexity`. Every field in the schema is required — do not skip any.
+5. **Finalize telemetry — GATE (steps 6-9 MUST NOT run until this is done):**
+   Compute ALL telemetry fields from [hub-architecture.md](references/hub-architecture.md#telemetry-schema) and write via:
+   **`node scripts/hub-gen.mjs <hub-path> write-meta <slug> '<json>'`**
    
-   **Important:** Telemetry lives ONLY in `meta.json` — NOT in `hub-config.json` or `projects/index.js`. Those files contain only lightweight metadata. The hub lazy-loads telemetry from `meta.json` on demand.
+   The JSON payload must include these **exact field names** (validated by `write-meta`):
+   - **Top-level:** `runStartedAt`, `runCompletedAt`, `durationMinutes`, `includedSetup`, `skillVersion`, `userPrompt`, `researchPlan`, `checkpointModified`, `model`, `tokenUsage` (object `{input, output, total}` or null if unavailable), `searchesPerformed`, `sourcesCount`, `sectionsBuilt`, `chartsBuilt`, `filesGenerated`, `dataPointsCollected`
+   - **`phaseTiming`:** `environment`, `interpret`, `survey`, `discover`, `research`, `analyze`, `build`, `enrich`, `present` (all 9 required)
+   - **`glossary`:** `enabled`, `termsIdentified`, `termsRendered`, `termsByCategory`
+   - **`contentAnalysis`:** `fleschKincaidGrade`, `fleschKincaidLabel`, `bloomsLevel`, `bloomsLabel`, `bloomsRange`, `totalWords`, `totalSentences`, `readabilityNote`
+   - **`hoursSaved`:** `researchHours`, `totalHoursSaved`, `equivalentLabel` (use formulas from hub-architecture.md)
+   - **`consumptionTime`:** `estimatedMinutes`, `estimatedLabel`
+   - **Quality metrics (required):** `dataQualityDistribution` (T1-T4 counts), `sourceDiversityScore`, `promptComplexity`
    
-   **Template mode:** For template-mode extensions, telemetry is embedded in the item JSON file (not a separate meta.json). The extension's `schema.json` defines which telemetry fields are relevant.
+   `write-meta` validates all required fields, unwraps the telemetry wrapper bug if present, and computes derived fields (`productionHours`) automatically. Telemetry lives ONLY in `meta.json` — NOT in `hub-config.json` or `projects/index.js`.
+   
+   **Template mode:** For template-mode extensions, telemetry is embedded in the item JSON file (not a separate meta.json).
 
-5. **Git sync (personal):** If the hub has a git remote: `git add -A` → `git commit` → `git push`. If push fails, note it.
+6. **Git sync (personal):** If the hub has a git remote: `git add -A` → `git commit` → `git push`. If push fails, note it.
 
-6. **Library share (gated by visibility):** Only share if the project's `visibility` is `"public"`. If `visibility` is `"personal"` or `"local"` (or missing — treated as `"personal"`), **skip sharing entirely**. For public projects, proceed for each library where contribution intent is yes (from Phase 3D):
+7. **Library share (gated by visibility):** Only share if the project's `visibility` is `"public"`. If `visibility` is `"personal"` or `"local"` (or missing — treated as `"personal"`), **skip sharing entirely**. For public projects, proceed for each library where contribution intent is yes (from Phase 3D):
    - Push project files (including `meta.json`) + updated `index.js` (lightweight metadata only) to the library's `branch` via the GitHub API. Library slug = `<slug>-<gitUsername>`.
    - See [hub-contribution.md](references/hub-contribution.md#agent-side-contribution-flow-phase-7-step-8) for the complete API flow.
    - If 401/403: PAT may be invalid — suggest contacting the library maintainer.
 
-7. **Library sync:** For each library just pushed to, pull the latest into the local library clone: `git -C <localPath> pull`. This ensures the hub shows the user's contribution in the library view.
+8. **Library sync:** For each library just pushed to, pull the latest into the local library clone: `git -C <localPath> pull`. This ensures the hub shows the user's contribution in the library view.
 
-8. **Deliver to hub:** Start dev server if not running (`npm run dev`), or tell user to refresh. Open browser preview. The user should now see their research in their personal space AND in the public library. Summarize sections, note gaps.
+9. **Deliver to hub:** Start dev server if not running (`npm run dev`), or tell user to refresh. Open browser preview. The user should now see their research in their personal space AND in the public library. Summarize sections, note gaps.
 
 ---
 

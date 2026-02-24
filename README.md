@@ -228,32 +228,37 @@ The skill prevents inconsistent output through:
 
 ```
 research-visualizer/
-├── SKILL.md                              # Core pipeline instructions (v7.2.1)
+├── SKILL.md                              # Core pipeline instructions (v8.0)
 ├── README.md                             # This file
 ├── config.json                           # Machine-local pointer (personalHubPath only, created on first run)
+├── scripts/
+│   └── hub-gen.mjs                       # Deterministic file generation tool (structural authority)
 ├── extensions/                           # Pluggable specializations
 │   ├── registry.md                       # Extension catalog + builder guide
 │   └── product-purchase/                 # First extension (bespoke mode)
 │       ├── EXTENSION.md                  # Product-specific pipeline logic
 │       └── references/
 │           └── product-comparison-template.md
-└── references/                           # Core reference files
+├── assets/                               # Templates, schemas, static resources (per Agent Skills spec)
+│   ├── build-templates.md                # Tech stack, file structures, data schemas, component patterns
+│   └── hub-scaffold-templates.md         # Hub React component templates
+└── references/                           # Documentation agents read on demand
     ├── hub-architecture.md               # Core config schema, directory structure, project registry
     ├── hub-contribution.md               # Library contribution flow, GitHub API, security model
     ├── hub-visibility.md                 # Visibility tiers, set-visibility API, UI badges
     ├── collections-architecture.md       # Template mode: collections, manifest, schema, rendering
-    ├── hub-scaffold-templates.md         # Hub React component templates
     ├── research-dimensions.md            # Standard Research Dimensions Framework
     ├── visualization-rules.md            # Chart type auto-selection rules + color palette
-    ├── subgroup-discovery.md             # Split decision matrix + taxonomy search templates + data quality tiers
-    └── build-templates.md                # Tech stack, file structures, data schemas, component patterns
+    └── subgroup-discovery.md             # Split decision matrix + taxonomy search templates + data quality tiers
 ```
 
 Follows the [agentskills.io specification](https://agentskills.io/specification):
-- SKILL.md under 500 lines with progressive disclosure via reference files
+- SKILL.md under 500 lines with progressive disclosure via reference/asset files
+- `references/` = documentation, `assets/` = templates/schemas, `scripts/` = executable code
 - Reference files loaded on-demand, not at activation
 - Extensions loaded only when trigger patterns match
 - Frontmatter includes `name`, `description`, `compatibility`, and `metadata`
+- Validated with `skills-ref validate` from the [agentskills/skills-ref](https://github.com/agentskills/agentskills/tree/main/skills-ref) package
 
 ## License
 
