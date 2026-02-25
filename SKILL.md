@@ -12,7 +12,7 @@ license: MIT
 compatibility: Requires internet access for web search and data fetching.
 metadata:
   author: mrshaun13
-  version: "8.11"
+  version: "8.12"
 ---
 
 # Deep Research → Interactive Dashboard Pipeline
@@ -82,7 +82,8 @@ Phase timing via `build-log.jsonl`. `write-meta` reads build log → computes ti
 **When enabled:**
 - `track <slug> phase-start <phase>` / `phase-end <phase>` at every boundary.
 - `track <slug> user-prompt discover checkpoint` before and `user-response discover checkpoint` after.
-- Chain in one `run_command` using `&&`, up to 6 per command. Set `GEN` and `HUB` as shell vars in the first command.
+- **Every `> Track` block is exactly ONE `run_command`. Chain all calls with `&&`. This is not optional.**
+- Set `GEN` and `HUB` as shell vars in the first command; up to 6 track calls per command.
 ```bash
 node $GEN $HUB track <slug> phase-end <A> 2>&1 | tail -1 && \
 node $GEN $HUB track <slug> phase-start <B> 2>&1 | tail -1 && \
@@ -90,6 +91,7 @@ node $GEN $HUB track <slug> phase-end <B> 2>&1 | tail -1 && \
 node $GEN $HUB track <slug> phase-start <C> 2>&1 | tail -1
 ```
 - Always set `SafeToAutoRun: true` on `track` commands. No other `hub-gen.mjs` subcommands qualify.
+- When timing is enabled, all 9 phases (`environment`, `interpret`, `survey`, `discover`, `research`, `analyze`, `build`, `enrich`, `present`) must have both `phase-start` and `phase-end` events.
 
 Derive slug in Phase 1 (kebab-case, same as `add-project`). For resumed sessions: `track-read <slug> --json`. See [hub-architecture.md § Build Log](references/hub-architecture.md#build-log-v81) for the full event table.
 
@@ -229,7 +231,10 @@ Decisions made HERE, after seeing the data.
    - `components/*.jsx` — sections with charts, callouts. Import shared components from `../../../components/`.
    - `data/*.js` — research data as ES module exports.
 6. **`node scripts/hub-gen.mjs <hub-path> install-components`**
-7. Check dev server (running → refresh; not running → `npm run dev`)
+7. Start dev server if not already running (port from `hub-config.json`):
+   ```bash
+   lsof -i :<port> | grep -q LISTEN || npm run dev &
+   ```
 8. Open browser preview
 
 > **Track (batch):**
@@ -300,12 +305,13 @@ Scan built project text, identify domain/technical terms a general audience woul
 > node $GEN $HUB track <slug> phase-end present 2>&1 | tail -1
 > ```
 5. **Telemetry GATE:** `node scripts/hub-gen.mjs <hub-path> write-meta <slug> '<json>'` — provide all required fields per [hub-architecture.md § Telemetry](references/hub-architecture.md#telemetry-fields). Missing fields = exit 1.
+   - **`model`:** Use the exact model identifier if known (e.g. `"claude-sonnet-4-5"`). Use `null` if not retrievable — the card will not show it.
    - **If timing enabled:** DO provide `phaseTiming` estimates (tracker overrides with real values). `write-meta` sets `timingSource` automatically (`"verified"` if build log has `session-end`, `"estimated"` otherwise).
    - **If timing skipped:** Pass `"phaseTiming": null`. `write-meta` sets `timingSource: "estimated"` automatically.
 6. **Git sync:** `git add -A` → `git commit` → `git push`
 7. **Library share:** Only if `visibility: "public"`. Push via GitHub API per [hub-contribution.md](references/hub-contribution.md).
 8. **Library sync:** `git -C <localPath> pull` for pushed libraries.
-9. **Deliver:** Start/refresh dev server, open browser preview, summarize.
+9. **Deliver:** Open browser preview using the port from `hub-config.json` (not any default). Verify port: `lsof -i :<port> | grep -q LISTEN && echo running || echo not running`. Summarize.
 
 ---
 

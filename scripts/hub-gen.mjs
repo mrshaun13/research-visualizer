@@ -33,7 +33,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 // Skill version — stamped into hub-config.json, generated files, and build log events
-const SKILL_VERSION = '8.11';
+const SKILL_VERSION = '8.12';
 
 // ═══════════════════════════════════════════════════
 //  CLI PARSING
@@ -1015,6 +1015,11 @@ function writeMeta() {
   if (metaErrors > 0) {
     logError('write-meta', `${metaErrors} required field(s) missing — refusing to write incomplete telemetry. All fields are required per hub-architecture.md.`);
     finish();
+  }
+
+  // model: null = unknown/not retrievable (valid). Empty string is not.
+  if (metaData.model === '') {
+    logWarn('write-meta', 'model is empty string — use null if the model identifier is not available');
   }
 
   // Compute derived fields if missing
