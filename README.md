@@ -228,11 +228,12 @@ The skill prevents inconsistent output through:
 
 ```
 research-visualizer/
-├── SKILL.md                              # Core pipeline instructions (v8.0)
+├── SKILL.md                              # Core pipeline instructions (v8.10)
 ├── README.md                             # This file
 ├── config.json                           # Machine-local pointer (personalHubPath only, created on first run)
 ├── scripts/
-│   └── hub-gen.mjs                       # Deterministic file generation tool (structural authority)
+│   ├── hub-gen.mjs                       # Deterministic file generation tool (structural authority)
+│   └── test-tracker-fallback.mjs         # Phase-timing tracker fallback tests
 ├── extensions/                           # Pluggable specializations
 │   ├── registry.md                       # Extension catalog + builder guide
 │   └── product-purchase/                 # First extension (bespoke mode)
@@ -246,6 +247,7 @@ research-visualizer/
     ├── hub-architecture.md               # Core config schema, directory structure, project registry
     ├── hub-contribution.md               # Library contribution flow, GitHub API, security model
     ├── hub-visibility.md                 # Visibility tiers, set-visibility API, UI badges
+    ├── first-time-setup.md               # First-time hub installation walkthrough
     ├── collections-architecture.md       # Template mode: collections, manifest, schema, rendering
     ├── research-dimensions.md            # Standard Research Dimensions Framework
     ├── visualization-rules.md            # Chart type auto-selection rules + color palette

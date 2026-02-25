@@ -81,7 +81,7 @@ Contains everything else: port, gitRepo, libraries, projects, telemetry. Committ
 | Field | Type | Description |
 |---|---|---|
 | `version` | string | Config schema version (current: "3.0") |
-| `frameworkVersion` | string | Research-visualizer framework version that last scaffolded or validated this hub (current: "8.0"). Stamped by `hub-gen.mjs scaffold` and `hub-gen.mjs validate --fix`. Used to detect stale scaffolds. |
+| `skillVersion` | string | Skill version that last scaffolded this hub. Stamped by `hub-gen.mjs scaffold` and auto-updated by `hub-gen.mjs validate --fix` when stale. Used to detect and auto-remediate stale shared components and scaffold files. |
 | `created` | ISO 8601 | When the hub was first set up |
 | `port` | number | Vite dev server port (default: 5180) |
 | `glossaryEnrichment` | boolean | Enable/disable Key Term Glossary enrichment (default: `true`). When enabled, Phase 6B scans dashboard text for domain/technical terms and wraps them in inline definition flyouts with research prompts. |
@@ -157,12 +157,13 @@ Every project tracks telemetry about its creation and the research run that prod
 ### Example
 
 ```json
-"telemetry": {
-  "runStartedAt": "2026-02-09T12:00:00Z",
-  "runCompletedAt": "2026-02-09T14:30:00Z",
+{
+  "runStartedAt": "2026-02-09T12:00:00.000Z",
+  "runCompletedAt": "2026-02-09T14:30:00.000Z",
   "durationMinutes": 150,
+  "timingSource": "verified",
   "includedSetup": false,
-  "skillVersion": "4.0",
+  "skillVersion": "8.1",
   "userPrompt": "I'm looking to buy an espresso machine for home use",
   "researchPlan": "PRODUCT TYPE: Espresso Machine\nLIFECYCLE: Semi-Durable\n...",
   "checkpointModified": false,
@@ -175,6 +176,9 @@ Every project tracks telemetry about its creation and the research run that prod
   "filesGenerated": 14,
   "productsCompared": 18,
   "dataPointsCollected": 216,
+  "userWaitMinutes": 2.5,
+  "agentActiveMinutes": 147.5,
+  "checkpointWaitMinutes": 1.8,
   "phaseTiming": {
     "environment": 2,
     "interpret": 5,
@@ -184,7 +188,14 @@ Every project tracks telemetry about its creation and the research run that prod
     "analyze": 10,
     "build": 40,
     "enrich": 3,
-    "present": 13
+    "present": 13,
+    "buildBreakdown": {
+      "add-project": 0.1,
+      "install-components": 0.1
+    },
+    "presentBreakdown": {
+      "validate": 0.3
+    }
   },
   "glossary": {
     "enabled": true,
@@ -207,6 +218,11 @@ Every project tracks telemetry about its creation and the research run that prod
 | `runStartedAt` | ISO 8601 | ✓ | Timestamp when the skill invocation began (Phase 0 start) |
 | `runCompletedAt` | ISO 8601 | ✓ | Timestamp when Phase 7 finished |
 | `durationMinutes` | number | ✓ | Total wall-clock minutes from start to finish |
+| `timingSource` | string | | `"verified"` (build log with `session-end` exists — timing is provably accurate) or `"estimated"` (no build log or incomplete — timing is approximate). |
+| `userWaitMinutes` | number | | Total minutes the agent was blocked waiting for user input (tracker-computed) |
+| `agentActiveMinutes` | number | | `durationMinutes - userWaitMinutes` — actual agent work time (tracker-computed) |
+| `checkpointWaitMinutes` | number | | Minutes specifically waiting at the Phase 3D checkpoint (tracker-computed) |
+| `sessionTimeline` | array\|undefined | | Ordered segments for full session visualization (verified builds only). Each element: `{ type: "phase", phase: "<name>", minutes: N }` or `{ type: "wait", context: "checkpoint"|"approval", minutes: N }`. Computed from build-log events by `write-meta`; interleaves human wait blocks at their exact positions in the session. |
 | `includedSetup` | boolean | ✓ | Whether Phase 0B (first-time hub setup) was part of this run |
 | `skillVersion` | string | ✓ | Version from SKILL.md frontmatter (e.g., "4.0") |
 | `userPrompt` | string | ✓ | The exact original prompt the user provided to trigger the skill |
@@ -234,6 +250,8 @@ Every project tracks telemetry about its creation and the research run that prod
 | `phaseTiming.build` | number | | Minutes spent in Phase 6 |
 | `phaseTiming.enrich` | number | | Minutes spent in Phase 6B |
 | `phaseTiming.present` | number | | Minutes spent in Phase 7 |
+| `phaseTiming.buildBreakdown` | object | | Per-tool timing within the build phase (tracker-computed). Keys are tool names (e.g., `add-project`, `install-components`), values are minutes. |
+| `phaseTiming.presentBreakdown` | object | | Per-tool timing within the present phase (tracker-computed). Keys are tool names (e.g., `validate`), values are minutes. |
 | `glossary` | object | ✓ | Key Term Glossary enrichment metrics |
 | `glossary.enabled` | boolean | | Whether the glossary enrichment ran for this project |
 | `glossary.termsIdentified` | number | | Total candidate terms found before density filtering |
@@ -373,25 +391,83 @@ estimatedMinutes = readingMinutes + chartExplorationMinutes + interactiveOverhea
 
 | Data Point | Capture Moment |
 |---|---|
-| `runStartedAt` | Phase 0 — immediately when skill begins |
+| `runStartedAt` | **Tracker** — first event timestamp (session-start) |
+| `runCompletedAt` | **Tracker** — last event timestamp (session-end, written by write-meta) |
+| `durationMinutes` | **Tracker** — computed from runStartedAt/runCompletedAt delta |
+| `phaseTiming.*` | **Tracker** — computed from phase-start/phase-end event deltas |
+| `userWaitMinutes` | **Tracker** — sum of user-prompt/user-response deltas |
+| `agentActiveMinutes` | **Tracker** — durationMinutes - userWaitMinutes |
+| `checkpointWaitMinutes` | **Tracker** — delta for checkpoint-context user-prompt/user-response |
+| `timingSource` | **Build log** — `"verified"` if `build-log.jsonl` exists with `session-end`, otherwise `"estimated"` |
+| `skillVersion` | **Tracker** — stamped in session-start event |
+| `model` | **Tracker** — stamped in session-start event (if provided) |
 | `includedSetup` | Phase 0 — set to true if Phase 0B runs |
-| `skillVersion` | Phase 0 — read from SKILL.md frontmatter |
 | `userPrompt` | Phase 1 — the raw user input before interpretation |
 | `researchPlan` | Phase 3D — the full checkpoint text shown to the user |
 | `checkpointModified` | Phase 3D — whether user requested adjustments |
-| `model` | Phase 0 — note the current model if detectable |
 | `searchesPerformed` | Phases 2-4 — increment counter with each web search |
 | `sourcesCount` | Phase 6 — count unique sources in the data files |
 | `sectionsBuilt`, `chartsBuilt`, `filesGenerated` | Phase 6 — count after build completes |
 | `productsCompared` | Phase 6 — count products array length (Product lens) |
 | `dataPointsCollected` | Phase 4 — count data points gathered |
-| `phaseTiming.*` | Each phase (including 6B enrich) — note start/end timestamps, calculate delta |
 | `glossary.*` | Phase 6B — capture after enrichment completes: enabled flag, terms identified vs rendered, category breakdown |
 | `contentAnalysis.*` | Phase 7 — analyze all text in built components |
 | `hoursSaved.*` | Phase 7 — calculate from build metrics using formulas above |
 | `consumptionTime.*` | Phase 7 — calculate from word count + chart count + FK grade |
-| `runCompletedAt`, `durationMinutes` | Phase 7 — final timestamp and total calculation |
 | `tokenUsage` | Phase 7 — if available from the runtime environment |
+
+### Build Log (v8.1+)
+
+All timing telemetry is captured by `hub-gen.mjs` via a `build-log.jsonl` event log in each project directory. The AI calls `track` at phase boundaries; the tool records the real timestamp. `write-meta` reads the build log and computes all timing fields deterministically. The build log is a **permanent committed artifact** — it is preserved after `write-meta` completes for auditability, rebuildability, and session resume.
+
+**Format:** JSONL (one JSON object per line). Each line is independently valid — a crash loses at most the last line.
+
+```jsonl
+{"event":"session-start","sessionId":"a1b2c3d4","skillVersion":"8.1","slug":"my-project","ts":"2026-02-23T23:29:00.000Z"}
+{"event":"phase-start","phase":"environment","ts":"2026-02-23T23:29:00.100Z"}
+{"event":"phase-end","phase":"environment","ts":"2026-02-23T23:29:02.500Z"}
+{"event":"user-prompt","phase":"discover","context":"checkpoint","ts":"2026-02-23T23:31:00.000Z"}
+{"event":"user-response","phase":"discover","context":"checkpoint","ts":"2026-02-23T23:33:30.000Z"}
+{"event":"tool-start","phase":"build","tool":"add-project","ts":"2026-02-23T23:33:31.000Z"}
+{"event":"tool-end","phase":"build","tool":"add-project","filesWritten":4,"ts":"2026-02-23T23:33:32.200Z"}
+{"event":"error","phase":"build","message":"vite build failed: missing import","ts":"2026-02-23T23:38:20.000Z"}
+{"event":"session-end","status":"completed","ts":"2026-02-23T23:39:47.000Z"}
+```
+
+**Event types:** `session-start`, `session-end`, `phase-start`, `phase-end`, `user-prompt`, `user-response`, `tool-start`, `tool-end`, `error`
+
+**Lifecycle:**
+1. AI calls `track <slug> session-start` at the start of the build
+2. AI calls `track <slug> phase-start/phase-end <phase>` at each phase boundary
+3. **Checkpoint gate only:** AI calls `track <slug> user-prompt <phase> checkpoint` immediately before presenting the Phase 3D checkpoint to the user, and `track <slug> user-response <phase> checkpoint` immediately after the user responds. These events are NOT emitted for general conversational turns — only at explicit approval gates where the AI stops and waits.
+4. `add-project` auto-writes `tool-start`/`tool-end` events (self-instrumenting)
+5. AI brackets `install-components` and `validate` with `track <slug> tool-start/tool-end` calls
+6. `write-meta` reads the build log, computes all timing, writes `session-end`, **preserves** the file
+7. **Session resume:** At the start of any resumed session, call `track-read <slug> --json` to determine which phases are complete and where to continue. Do not re-run completed phases.
+
+**`timingSource` — Binary Trust Signal**
+
+`timingSource` has exactly two values: `"verified"` or `"estimated"`. The `build-log.jsonl` file is the proof artifact.
+
+| `timingSource` | Condition | Meaning |
+|---|---|---|
+| `"verified"` | `build-log.jsonl` exists with a `session-end` event | Timing was measured by the build tracker. Phase durations, agent active time, and human wait time are derived from real event timestamps. |
+| `"estimated"` | No `build-log.jsonl`, or log has no `session-end` | Timing is an AI estimate. Numbers are approximate. |
+
+**Resolution in `write-meta`:** If `build-log.jsonl` exists and contains a `session-end` event, `write-meta` computes all timing from the log and sets `timingSource: "verified"`. Otherwise, it accepts AI-provided timing and sets `timingSource: "estimated"`.
+
+**Resolution in `validate --fix`:** For each project, validate checks whether `build-log.jsonl` exists with `session-end`. If `timingSource` is missing, has a legacy value (`"tracker"`, `"backfilled"`, `"ai-best-effort"`, `"ai-estimated"`, `"none"`), or claims `"verified"` without proof, `--fix` corrects it.
+
+**When verified, per-phase behavior:**
+- Phase has `phase-start` + `phase-end` → computed from event delta (overrides AI value)
+- Phase has no events but AI provided `phaseTiming.<phase>` → AI value kept as fallback
+- Phase has neither → stamped `"untracked"` with a warning
+
+**UI presentation:** The hub shows a ✓ (green) badge next to build time for verified projects and a ~ (gray) badge for estimated. The flyout header shows a banner explaining the timing provenance.
+
+**Stale detection:** `validate` warns about `build-log.jsonl` files older than 24 hours that have no `session-end` event — these indicate interrupted builds.
+
+**Git:** `build-log.jsonl` is a permanent artifact — committed alongside `meta.json` and project files.
 
 ## Hub Directory Structure
 
@@ -560,7 +636,7 @@ Every file in the hub falls into one of two categories based on **who owns it**:
 | File | Classification | Owner | Notes |
 |------|---------------|-------|-------|
 | `hub-config.json` → `projects[]`, `libraries[]`, `collections[]`, `gitRepo`, `port`, `created` | **Sacred** | User data | Project metadata, library configs, user preferences |
-| `hub-config.json` → `version`, `frameworkVersion` | **Sacred** (managed) | Skill | Schema version markers — skill stamps these but never deletes user fields |
+| `hub-config.json` → `version`, `skillVersion` | **Sacred** (managed) | Skill | Schema version markers — skill stamps these but never deletes user fields |
 | `.local-config.json` → `libraries[]`, `localProjects[]` | **Sacred** | User data | Machine-specific paths and local-only project metadata |
 | `config.json` → `personalHubPath` | **Sacred** | User data | Machine-local pointer to hub directory |
 | `src/projects/*/` (all project directories & contents) | **Sacred** | User data | Research dashboards — App.jsx, components/, data/ per project |

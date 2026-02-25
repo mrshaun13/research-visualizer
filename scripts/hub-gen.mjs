@@ -23,16 +23,17 @@
  *   --check      (validate only) Exit 1 if issues found (CI mode)
  */
 
-import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync, statSync, copyFileSync } from 'fs';
+import { readFileSync, writeFileSync, appendFileSync, mkdirSync, readdirSync, existsSync, statSync, copyFileSync, unlinkSync, rmSync } from 'fs';
 import { join, resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { execSync } from 'child_process';
+import { randomBytes } from 'crypto';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// Framework version — stamped into hub-config.json and generated files
-const FRAMEWORK_VERSION = '8.0';
+// Skill version — stamped into hub-config.json, generated files, and build log events
+const SKILL_VERSION = '8.10';
 
 // ═══════════════════════════════════════════════════
 //  CLI PARSING
@@ -49,7 +50,7 @@ const autoFix = flags.includes('--fix');
 const checkOnly = flags.includes('--check');
 const buildVerify = flags.includes('--build');
 
-const COMMANDS = ['sync-registry', 'add-project', 'write-meta', 'install-components', 'scaffold', 'validate', 'doctor'];
+const COMMANDS = ['sync-registry', 'add-project', 'remove-project', 'write-meta', 'install-components', 'scaffold', 'validate', 'doctor', 'track', 'track-read'];
 
 if (positional.length < 2 || !COMMANDS.includes(positional[1])) {
   console.error('Usage: node hub-gen.mjs <hub-root> <command> [args...]');
@@ -57,11 +58,14 @@ if (positional.length < 2 || !COMMANDS.includes(positional[1])) {
   console.error('Commands:');
   console.error('  sync-registry              Regenerate src/projects/index.js from hub-config.json');
   console.error('  add-project <json>         Add a new project (JSON string or @file.json)');
+  console.error('  remove-project <slug>      Remove a project (deletes directory + config entry + re-syncs registry)');
   console.error('  write-meta <slug> <json>   Write validated meta.json for a project');
   console.error('  install-components         Install shared components to src/components/');
   console.error('  scaffold                   Generate all Phase 0B scaffold files');
   console.error('  validate                   Validate all hub files (structural + creative content)');
   console.error('  doctor                     Alias for validate --fix');
+  console.error('  track <slug> <event> [args]  Append a build-log event');
+  console.error('  track-read <slug>          Read tracker state for a project');
   console.error('');
   console.error('Options:');
   console.error('  --dry-run    Show changes without writing');
@@ -97,6 +101,323 @@ const PATHS = {
   srcDir: join(HUB, 'src'),
   hubHome: join(HUB, 'src/components/HubHome.jsx'),
 };
+
+// ═══════════════════════════════════════════════════
+//  BUILD LOG — deterministic timing via JSONL event log
+// ═══════════════════════════════════════════════════
+
+const TRACKER_FILENAME = 'build-log.jsonl';
+const VALID_EVENTS = ['session-start', 'session-end', 'phase-start', 'phase-end', 'user-prompt', 'user-response', 'tool-start', 'tool-end', 'error'];
+const VALID_PHASES = ['environment', 'interpret', 'survey', 'discover', 'research', 'analyze', 'build', 'enrich', 'present'];
+
+function trackerPath(slug) {
+  return join(PATHS.projectsDir, slug, TRACKER_FILENAME);
+}
+
+function generateSessionId() {
+  return randomBytes(4).toString('hex');
+}
+
+function readTracker(slug) {
+  const tp = trackerPath(slug);
+  if (!existsSync(tp)) return [];
+  const lines = readFileSync(tp, 'utf-8').split('\n').filter(l => l.trim());
+  const events = [];
+  for (const line of lines) {
+    try { events.push(JSON.parse(line)); } catch { /* skip malformed trailing line */ }
+  }
+  return events;
+}
+
+function appendTrackerEvent(slug, eventObj) {
+  const tp = trackerPath(slug);
+  const dir = dirname(tp);
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  appendFileSync(tp, JSON.stringify(eventObj) + '\n');
+}
+
+
+function getSessionId(slug) {
+  const events = readTracker(slug);
+  const first = events.find(e => e.sessionId);
+  return first ? first.sessionId : generateSessionId();
+}
+
+function computeTimingFromTracker(events) {
+  if (!events.length) return null;
+
+  const result = {};
+
+  // runStartedAt / runCompletedAt
+  result.runStartedAt = events[0].ts;
+  result.runCompletedAt = events[events.length - 1].ts;
+  const startMs = new Date(result.runStartedAt).getTime();
+  const endMs = new Date(result.runCompletedAt).getTime();
+  result.durationMinutes = Math.round((endMs - startMs) / 60000 * 10) / 10;
+
+  // phaseTiming — delta between phase-start and phase-end for each phase
+  const phaseTiming = {};
+  const phaseStarts = {};
+  for (const e of events) {
+    if (e.event === 'phase-start' && e.phase) {
+      phaseStarts[e.phase] = new Date(e.ts).getTime();
+    } else if (e.event === 'phase-end' && e.phase && phaseStarts[e.phase]) {
+      const delta = (new Date(e.ts).getTime() - phaseStarts[e.phase]) / 60000;
+      phaseTiming[e.phase] = Math.round(delta * 10) / 10;
+    }
+  }
+  result.phaseTiming = phaseTiming;
+
+  // userWaitMinutes — sum of (user-response.ts - user-prompt.ts) deltas
+  let userWaitMs = 0;
+  let checkpointWaitMs = 0;
+  const promptStack = [];
+  for (const e of events) {
+    if (e.event === 'user-prompt') {
+      promptStack.push(e);
+    } else if (e.event === 'user-response' && promptStack.length > 0) {
+      const prompt = promptStack.pop();
+      const delta = new Date(e.ts).getTime() - new Date(prompt.ts).getTime();
+      userWaitMs += delta;
+      if (prompt.context === 'checkpoint' || e.context === 'checkpoint') {
+        checkpointWaitMs += delta;
+      }
+    }
+  }
+  result.userWaitMinutes = Math.round(userWaitMs / 60000 * 10) / 10;
+  result.checkpointWaitMinutes = Math.round(checkpointWaitMs / 60000 * 10) / 10;
+  result.agentActiveMinutes = Math.round((result.durationMinutes - result.userWaitMinutes) * 10) / 10;
+
+  // Tool breakdowns for build/present phases
+  const toolTimings = {};
+  const toolStarts = {};
+  for (const e of events) {
+    if (e.event === 'tool-start' && e.tool) {
+      toolStarts[`${e.phase}:${e.tool}`] = e;
+    } else if (e.event === 'tool-end' && e.tool) {
+      const key = `${e.phase}:${e.tool}`;
+      const start = toolStarts[key];
+      if (start) {
+        const delta = (new Date(e.ts).getTime() - new Date(start.ts).getTime()) / 60000;
+        if (!toolTimings[e.phase]) toolTimings[e.phase] = {};
+        toolTimings[e.phase][e.tool] = Math.round(delta * 10) / 10;
+      }
+    }
+  }
+  if (toolTimings.build) result.buildBreakdown = toolTimings.build;
+  if (toolTimings.present) result.presentBreakdown = toolTimings.present;
+
+  // filesGenerated — sum of filesWritten from tool-end events
+  let filesGenerated = 0;
+  for (const e of events) {
+    if (e.event === 'tool-end' && typeof e.filesWritten === 'number') {
+      filesGenerated += e.filesWritten;
+    }
+  }
+  if (filesGenerated > 0) result.filesGenerated = filesGenerated;
+
+  // skillVersion from session-start
+  const sessionStart = events.find(e => e.event === 'session-start');
+  if (sessionStart) {
+    if (sessionStart.skillVersion) result.skillVersion = sessionStart.skillVersion;
+    if (sessionStart.model) result.model = sessionStart.model;
+  }
+
+  // sessionTimeline — ordered segments for full session visualization
+  // Walk events chronologically, emit phase segments and human-wait gaps
+  const timeline = [];
+  let currentPhaseStart = null;
+  let currentPhase = null;
+  let waitStart = null;
+  let waitContext = null;
+  for (const e of events) {
+    if (e.event === 'phase-start' && e.phase) {
+      currentPhase = e.phase;
+      currentPhaseStart = new Date(e.ts).getTime();
+    } else if (e.event === 'phase-end' && e.phase && currentPhaseStart) {
+      const endMs2 = new Date(e.ts).getTime();
+      const mins = Math.round((endMs2 - currentPhaseStart) / 60000 * 10) / 10;
+      if (mins > 0) timeline.push({ type: 'phase', phase: e.phase, minutes: mins });
+      currentPhaseStart = null;
+      currentPhase = null;
+    } else if (e.event === 'user-prompt') {
+      waitStart = new Date(e.ts).getTime();
+      waitContext = e.context || 'approval';
+      // Split current phase: emit phase time before the wait
+      if (currentPhaseStart && waitStart > currentPhaseStart) {
+        const preMins = Math.round((waitStart - currentPhaseStart) / 60000 * 10) / 10;
+        if (preMins > 0) timeline.push({ type: 'phase', phase: currentPhase, minutes: preMins });
+      }
+    } else if (e.event === 'user-response' && waitStart) {
+      const responseMs = new Date(e.ts).getTime();
+      const waitMins = Math.round((responseMs - waitStart) / 60000 * 10) / 10;
+      if (waitMins > 0) timeline.push({ type: 'wait', context: waitContext, minutes: waitMins });
+      // Resume current phase from after the wait
+      if (currentPhase) currentPhaseStart = responseMs;
+      waitStart = null;
+      waitContext = null;
+    }
+  }
+  result.sessionTimeline = timeline;
+
+  result.timingSource = 'verified';
+  return result;
+}
+
+// ── COMMAND: track ──
+
+function track() {
+  if (commandArgs.length < 2) {
+    logError('track', 'Usage: track <slug> <event-type> [phase] [context|message]');
+    finish();
+  }
+
+  const slug = commandArgs[0];
+  const eventType = commandArgs[1];
+
+  if (!VALID_EVENTS.includes(eventType)) {
+    logError('track', `Invalid event type: ${eventType}. Valid: ${VALID_EVENTS.join(', ')}`);
+    finish();
+  }
+
+  const ts = new Date().toISOString();
+  const eventObj = { event: eventType, ts };
+
+  // session-start gets special handling — generates sessionId, accepts optional metadata
+  if (eventType === 'session-start') {
+    eventObj.sessionId = generateSessionId();
+    eventObj.skillVersion = SKILL_VERSION;
+    eventObj.slug = slug;
+    // Optional: model passed as commandArgs[2]
+    if (commandArgs[2]) eventObj.model = commandArgs[2];
+  } else {
+    // All other events inherit sessionId from existing tracker
+    eventObj.sessionId = getSessionId(slug);
+  }
+
+  // phase-start, phase-end, user-prompt, user-response, error — require phase arg
+  if (['phase-start', 'phase-end', 'user-prompt', 'user-response', 'error'].includes(eventType)) {
+    const phase = commandArgs[2];
+    if (!phase) {
+      logError('track', `${eventType} requires a phase argument`);
+      finish();
+    }
+    eventObj.phase = phase;
+
+    // user-prompt/user-response accept optional context (e.g., "checkpoint")
+    if (['user-prompt', 'user-response'].includes(eventType) && commandArgs[3]) {
+      eventObj.context = commandArgs[3];
+    }
+
+    // error accepts a message
+    if (eventType === 'error' && commandArgs[3]) {
+      eventObj.message = commandArgs.slice(3).join(' ');
+    }
+  }
+
+  // tool-start, tool-end — require phase and tool args
+  if (['tool-start', 'tool-end'].includes(eventType)) {
+    const phase = commandArgs[2];
+    const tool = commandArgs[3];
+    if (!phase || !tool) {
+      logError('track', `${eventType} requires phase and tool arguments`);
+      finish();
+    }
+    eventObj.phase = phase;
+    eventObj.tool = tool;
+
+    // tool-end accepts optional filesWritten as commandArgs[4]
+    if (eventType === 'tool-end' && commandArgs[4]) {
+      const fw = parseInt(commandArgs[4], 10);
+      if (!isNaN(fw)) eventObj.filesWritten = fw;
+    }
+  }
+
+  // session-end accepts optional status
+  if (eventType === 'session-end') {
+    eventObj.status = commandArgs[2] || 'completed';
+    eventObj.sessionId = getSessionId(slug);
+  }
+
+  // Monotonic timestamp validation
+  const existing = readTracker(slug);
+  if (existing.length > 0) {
+    const lastTs = new Date(existing[existing.length - 1].ts).getTime();
+    const newTs = new Date(ts).getTime();
+    if (newTs < lastTs) {
+      logWarn('track', `Non-monotonic timestamp detected: ${ts} < ${existing[existing.length - 1].ts}`);
+    }
+  }
+
+  if (dryRun) {
+    logAction('would-track', JSON.stringify(eventObj));
+  } else {
+    appendTrackerEvent(slug, eventObj);
+    logAction('track', `${eventType}${eventObj.phase ? ' ' + eventObj.phase : ''}${eventObj.tool ? ' ' + eventObj.tool : ''}`);
+  }
+}
+
+// ── COMMAND: track-read ──
+
+function trackRead() {
+  if (commandArgs.length < 1) {
+    logError('track-read', 'Usage: track-read <slug>');
+    finish();
+  }
+
+  const slug = commandArgs[0];
+  const events = readTracker(slug);
+
+  if (events.length === 0) {
+    results.tracker = { status: 'no-tracker', slug };
+    if (!jsonOutput) log(`  No tracker found for "${slug}"`);
+    return;
+  }
+
+  const sessionStart = events.find(e => e.event === 'session-start');
+  const sessionEnd = events.find(e => e.event === 'session-end');
+  const lastEvent = events[events.length - 1];
+
+  // Determine completed phases
+  const completedPhases = [];
+  for (const phase of VALID_PHASES) {
+    if (events.some(e => e.event === 'phase-end' && e.phase === phase)) {
+      completedPhases.push(phase);
+    }
+  }
+
+  // Find the last active phase (started but not ended)
+  let lastPhase = null;
+  for (const e of [...events].reverse()) {
+    if (e.phase) { lastPhase = e.phase; break; }
+  }
+
+  const startMs = new Date(events[0].ts).getTime();
+  const endMs = new Date(lastEvent.ts).getTime();
+
+  const state = {
+    sessionId: sessionStart?.sessionId || null,
+    status: sessionEnd ? 'completed' : 'in-progress',
+    skillVersion: sessionStart?.skillVersion || null,
+    model: sessionStart?.model || null,
+    slug,
+    lastPhase,
+    lastEvent: lastEvent.event,
+    completedPhases,
+    elapsedMinutes: Math.round((endMs - startMs) / 60000 * 10) / 10,
+    eventCount: events.length,
+  };
+
+  results.tracker = state;
+
+  if (!jsonOutput) {
+    log(`  Session: ${state.sessionId || 'unknown'}`);
+    log(`  Status:  ${state.status}`);
+    log(`  Phase:   ${state.lastPhase || 'none'} (${state.lastEvent})`);
+    log(`  Done:    ${completedPhases.join(', ') || 'none'}`);
+    log(`  Elapsed: ${state.elapsedMinutes} min (${state.eventCount} events)`);
+  }
+}
 
 // ═══════════════════════════════════════════════════
 //  LOGGING
@@ -270,6 +591,48 @@ function escapeJs(str) {
 }
 
 // ═══════════════════════════════════════════════════
+//  COMMAND: remove-project
+// ═══════════════════════════════════════════════════
+
+function removeProject() {
+  log('\n── remove-project ──');
+
+  const slug = commandArgs[0];
+  if (!slug) {
+    logError('remove-project', 'Missing slug argument. Usage: remove-project <slug>');
+    finish();
+  }
+
+  // 1. Check it exists in config
+  const config = loadHubConfig();
+  const existingIdx = (config.projects || []).findIndex(p => p.slug === slug);
+  if (existingIdx < 0) {
+    logWarn('remove-project', `Project "${slug}" not found in hub-config.json — may already be removed`);
+  } else {
+    config.projects.splice(existingIdx, 1);
+    writeFile(PATHS.hubConfig, JSON.stringify(config, null, 2) + '\n');
+    logAction('remove-config', `Removed "${slug}" from hub-config.json`);
+  }
+
+  // 2. Delete project directory
+  const projectDir = join(PATHS.projectsDir, slug);
+  if (existsSync(projectDir)) {
+    if (!dryRun) {
+      rmSync(projectDir, { recursive: true, force: true });
+    }
+    logAction('rmdir', `src/projects/${slug}`);
+  } else {
+    logWarn('remove-project', `Directory src/projects/${slug} not found — skipping`);
+  }
+
+  // 3. Regenerate registry
+  syncRegistry();
+
+  results.removedSlug = slug;
+  logVerbose(`Removed project "${slug}"`);
+}
+
+// ═══════════════════════════════════════════════════
 //  COMMAND: add-project
 // ═══════════════════════════════════════════════════
 
@@ -306,6 +669,15 @@ function addProject() {
   }
 
   const slug = projectData.slug;
+
+  // Tracker: auto-write session-start + tool-start if tracker doesn't exist yet
+  if (!dryRun) {
+    const existingEvents = readTracker(slug);
+    if (existingEvents.length === 0) {
+      appendTrackerEvent(slug, { event: 'session-start', sessionId: generateSessionId(), skillVersion: SKILL_VERSION, slug, ts: new Date().toISOString() });
+    }
+    appendTrackerEvent(slug, { event: 'tool-start', phase: 'build', tool: 'add-project', sessionId: getSessionId(slug), ts: new Date().toISOString() });
+  }
 
   // Apply defaults
   if (!projectData.lens) projectData.lens = 'standard';
@@ -361,6 +733,12 @@ function addProject() {
     sections: sections,
   };
 
+  // Tracker: tool-end with filesWritten count
+  if (!dryRun) {
+    const filesWritten = 2 + sections.length; // App.jsx + hub-config.json + section placeholders
+    appendTrackerEvent(slug, { event: 'tool-end', phase: 'build', tool: 'add-project', sessionId: getSessionId(slug), filesWritten, ts: new Date().toISOString() });
+  }
+
   logVerbose(`Added project "${slug}" with ${sections.length} sections`);
 }
 
@@ -388,7 +766,7 @@ function generateProjectApp(slug, project, sections) {
   const lines = [];
 
   // Version marker
-  lines.push(`// Research Hub — generated by research-visualizer v${FRAMEWORK_VERSION}`);
+  lines.push(`// Research Hub — generated by research-visualizer v${SKILL_VERSION}`);
 
   // Imports
   lines.push("import React, { useState } from 'react';");
@@ -516,6 +894,94 @@ function writeMeta() {
     logWarn('write-meta', 'Unwrapped telemetry wrapper — AI should provide flat object');
   }
 
+  // ── Build Log Integration ──
+  // timingSource is binary: "verified" (build log with session-end) or "estimated" (everything else).
+  // The build-log.jsonl IS the proof artifact. If it ships with the project, timing is verified.
+  //
+  // Write session-end FIRST (if not already present) so hasSessionEnd check below sees it.
+  // Tagged with source:"write-meta" to distinguish from an AI-tracked session-end.
+  const trackerEventsPre = readTracker(slug);
+  if (trackerEventsPre.length > 0 && !trackerEventsPre.some(e => e.event === 'session-end') && !dryRun) {
+    appendTrackerEvent(slug, { event: 'session-end', status: 'completed', sessionId: getSessionId(slug), source: 'write-meta', ts: new Date().toISOString() });
+    logAction('tracker', 'Wrote session-end to build log (source: write-meta)');
+  }
+
+  const trackerEvents = readTracker(slug);
+  const hasSessionEnd = trackerEvents.some(e => e.event === 'session-end');
+
+  if (trackerEvents.length > 0 && hasSessionEnd) {
+    const computed = computeTimingFromTracker(trackerEvents);
+    if (computed) {
+      // Aggregate timing always from tracker
+      metaData.runStartedAt = computed.runStartedAt;
+      metaData.runCompletedAt = computed.runCompletedAt;
+      metaData.durationMinutes = computed.durationMinutes;
+      metaData.timingSource = 'verified';
+
+      // Merge phaseTiming — tracker values override AI values
+      if (!metaData.phaseTiming) metaData.phaseTiming = {};
+      for (const phase of VALID_PHASES) {
+        if (computed.phaseTiming[phase] !== undefined) {
+          metaData.phaseTiming[phase] = computed.phaseTiming[phase];
+        } else if (metaData.phaseTiming[phase] === undefined) {
+          metaData.phaseTiming[phase] = 'untracked';
+          logWarn('write-meta', `Phase "${phase}" has no timing — add phaseTiming.${phase} to write-meta payload as a fallback.`);
+        }
+      }
+
+      // Add build/present breakdowns if available
+      if (computed.buildBreakdown) metaData.phaseTiming.buildBreakdown = computed.buildBreakdown;
+      if (computed.presentBreakdown) metaData.phaseTiming.presentBreakdown = computed.presentBreakdown;
+
+      // Session breakdown fields
+      metaData.userWaitMinutes = computed.userWaitMinutes;
+      metaData.agentActiveMinutes = computed.agentActiveMinutes;
+      metaData.checkpointWaitMinutes = computed.checkpointWaitMinutes;
+
+      // Session timeline — interleaved phase + human-wait segments for visualization
+      if (computed.sessionTimeline?.length > 0) metaData.sessionTimeline = computed.sessionTimeline;
+
+      // Override filesGenerated if tracker has a count
+      if (computed.filesGenerated) metaData.filesGenerated = computed.filesGenerated;
+
+      // Use tracker's skillVersion/model if available and AI didn't provide
+      if (computed.skillVersion && !metaData.skillVersion) metaData.skillVersion = computed.skillVersion;
+      if (computed.model && !metaData.model) metaData.model = computed.model;
+
+      logAction('tracker', `Verified timing from ${trackerEvents.length} build-log events`);
+    }
+  } else {
+    // No build log or incomplete (no session-end) — timing is estimated
+    metaData.timingSource = 'estimated';
+    if (trackerEvents.length > 0 && !hasSessionEnd) {
+      logWarn('write-meta', 'Build log exists but session-end is missing even after write attempt — timing marked as estimated');
+      // Partial extraction — human-wait times, phase timing, and session timeline
+      // are computable from whatever events exist. Don't discard them.
+      const partial = computeTimingFromTracker(trackerEvents);
+      if (partial) {
+        // Human-in-the-loop timing — use if present
+        if (partial.userWaitMinutes > 0) metaData.userWaitMinutes = partial.userWaitMinutes;
+        if (partial.checkpointWaitMinutes > 0) metaData.checkpointWaitMinutes = partial.checkpointWaitMinutes;
+        if (partial.agentActiveMinutes > 0) metaData.agentActiveMinutes = partial.agentActiveMinutes;
+        // Phase timing — tracker values override AI values where available
+        if (partial.phaseTiming && Object.keys(partial.phaseTiming).length > 0) {
+          if (!metaData.phaseTiming) metaData.phaseTiming = {};
+          for (const phase of VALID_PHASES) {
+            if (partial.phaseTiming[phase] !== undefined) {
+              metaData.phaseTiming[phase] = partial.phaseTiming[phase];
+            }
+          }
+        }
+        // Session timeline — still useful for partial visualization
+        if (partial.sessionTimeline?.length > 0) metaData.sessionTimeline = partial.sessionTimeline;
+        if (partial.filesGenerated) metaData.filesGenerated = partial.filesGenerated;
+        logAction('tracker', `Extracted partial timing from ${trackerEvents.length} build-log events (no session-end — estimated)`);
+      }
+    } else {
+      logVerbose('No build log — timing marked as estimated');
+    }
+  }
+
   // Validate required fields — missing fields block the write
   let metaErrors = 0;
   for (const field of REQUIRED_META_FIELDS) {
@@ -528,6 +994,11 @@ function writeMeta() {
 
   // Validate required blocks
   for (const [block, children] of Object.entries(REQUIRED_META_BLOCKS)) {
+    // phaseTiming: null is valid when timing is estimated (no build log to derive phase breakdown)
+    if (block === 'phaseTiming' && metaData[block] === null && metaData.timingSource === 'estimated') {
+      logVerbose(`phaseTiming: null (timingSource: estimated — valid)`);
+      continue;
+    }
     if (!metaData[block] || typeof metaData[block] !== 'object') {
       logError('write-meta', `Missing required block: ${block}`);
       metaErrors++;
@@ -567,6 +1038,9 @@ function writeMeta() {
   }
 
   writeFile(join(projectDir, 'meta.json'), JSON.stringify(metaData, null, 2) + '\n');
+
+  // session-end already written above before timing computation — nothing to do here.
+
   logVerbose(`Wrote meta.json for "${slug}" with ${Object.keys(metaData).length} top-level fields`);
 }
 
@@ -777,13 +1251,13 @@ function scaffold() {
   // Ensure ESLint devDependencies in package.json
   ensureEslintDeps();
 
-  // Stamp frameworkVersion in hub-config.json
+  // Stamp skillVersion in hub-config.json
   if (existsSync(PATHS.hubConfig)) {
     const config = loadHubConfig();
-    if (config.frameworkVersion !== FRAMEWORK_VERSION) {
-      config.frameworkVersion = FRAMEWORK_VERSION;
+    if (config.skillVersion !== SKILL_VERSION) {
+      config.skillVersion = SKILL_VERSION;
       writeFile(PATHS.hubConfig, JSON.stringify(config, null, 2) + '\n');
-      logAction('version-stamp', `Set frameworkVersion to ${FRAMEWORK_VERSION} in hub-config.json`);
+      logAction('version-stamp', `Set skillVersion to ${SKILL_VERSION} in hub-config.json`);
     }
     syncRegistry();
   } else {
@@ -1012,7 +1486,7 @@ function validate() {
   const mode = checkOnly ? 'CHECK (CI)' : canFix ? 'DETECT + FIX' : 'DETECT ONLY';
   log(`\n── validate (${mode}) ──`);
 
-  const config = loadHubConfig();
+  let config = loadHubConfig();
   const localConfig = loadLocalConfig();
 
   // Auto-discover public library path
@@ -1022,17 +1496,23 @@ function validate() {
     if (lib) publicProjectsDir = join(resolve(lib.localPath), 'src/projects');
   }
 
-  // ─── 0. frameworkVersion stamp ───
-  if (!config.frameworkVersion) {
+  // ─── 0. skillVersion check — auto-scaffold when stale ───
+  if (!config.skillVersion) {
     if (canFix && !dryRun) {
-      config.frameworkVersion = FRAMEWORK_VERSION;
-      writeFileSync(PATHS.hubConfig, JSON.stringify(config, null, 2) + '\n');
-      logAction('version-stamp', `Set frameworkVersion to ${FRAMEWORK_VERSION}`);
+      logAction('scaffold', `hub-config.json missing skillVersion — running scaffold to initialize (${SKILL_VERSION})`);
+      scaffold();
+      config = loadHubConfig(); // reload after scaffold stamps it
     } else {
-      logWarn('version', `hub-config.json missing frameworkVersion (use --fix to stamp ${FRAMEWORK_VERSION})`);
+      logWarn('version', `hub-config.json missing skillVersion (use --fix to scaffold and stamp ${SKILL_VERSION})`);
     }
-  } else if (config.frameworkVersion !== FRAMEWORK_VERSION) {
-    logWarn('version', `hub-config.json frameworkVersion is ${config.frameworkVersion}, current is ${FRAMEWORK_VERSION}`);
+  } else if (config.skillVersion !== SKILL_VERSION) {
+    if (canFix && !dryRun) {
+      logAction('scaffold', `skillVersion ${config.skillVersion} → ${SKILL_VERSION} — running scaffold to update shared components`);
+      scaffold();
+      config = loadHubConfig(); // reload after scaffold stamps it
+    } else {
+      logWarn('version', `hub-config.json skillVersion is ${config.skillVersion}, current is ${SKILL_VERSION} — use --fix to auto-scaffold`);
+    }
   }
 
   // ─── 1. meta.json format + content ───
@@ -1082,7 +1562,10 @@ function validate() {
   // ─── 11. Cross-hub visibility reconciliation ───
   validateVisibility(config, localConfig, publicProjectsDir);
 
-  // ─── 12. Build verification (--build flag) ───
+  // ─── 12. Orphaned build trackers ───
+  validateOrphanedTrackers();
+
+  // ─── 13. Build verification (--build flag) ───
   if (buildVerify) {
     verifyBuild();
   }
@@ -1092,7 +1575,7 @@ function validate() {
     totalErrors: results.errors.length,
     totalWarnings: results.warnings.length,
     totalActions: results.actions.length,
-    frameworkVersion: config.frameworkVersion || null,
+    skillVersion: config.skillVersion || null,
     passed: results.errors.length === 0,
   };
 
@@ -1317,6 +1800,61 @@ function validateMetaJson(projectsDir, label) {
       }
     }
 
+    // timingSource integrity: "verified" requires build-log.jsonl with session-end
+    const buildLogPath = join(projectsDir, slug, 'build-log.jsonl');
+    const hasBuildLog = existsSync(buildLogPath);
+    let hasLogSessionEnd = false;
+    if (hasBuildLog) {
+      try {
+        const logLines = readFileSync(buildLogPath, 'utf-8').split('\n').filter(l => l.trim());
+        hasLogSessionEnd = logLines.some(l => { try { return JSON.parse(l).event === 'session-end'; } catch { return false; } });
+      } catch { /* ignore read errors */ }
+    }
+    const isVerifiable = hasBuildLog && hasLogSessionEnd;
+    const currentTS = data.timingSource;
+    const legacyValues = ['tracker', 'backfilled', 'ai-best-effort', 'ai-estimated', 'none'];
+
+    if (currentTS === 'verified' && !isVerifiable) {
+      // Claims verified but no proof — downgrade
+      if (canFix && !dryRun) {
+        data.timingSource = 'estimated';
+        writeFileSync(metaPath, JSON.stringify(data, null, 2) + '\n');
+        logAction('fix-meta', `${slug}/meta.json — downgraded timingSource to "estimated" (no build-log.jsonl with session-end)`);
+      } else {
+        logError('meta', `${slug}/meta.json timingSource is "verified" but no build-log.jsonl with session-end exists`);
+      }
+    } else if (!currentTS || legacyValues.includes(currentTS)) {
+      // Missing or legacy value — set to verified/estimated based on proof
+      const newTS = isVerifiable ? 'verified' : 'estimated';
+      if (currentTS !== newTS) {
+        if (canFix && !dryRun) {
+          data.timingSource = newTS;
+          writeFileSync(metaPath, JSON.stringify(data, null, 2) + '\n');
+          logAction('fix-meta', `${slug}/meta.json — set timingSource to "${newTS}"${currentTS ? ` (was "${currentTS}")` : ''}`);
+        } else if (!currentTS) {
+          logWarn('meta', `${slug}/meta.json missing timingSource (use --fix to set "${newTS}")`);
+        } else {
+          logWarn('meta', `${slug}/meta.json has legacy timingSource "${currentTS}" (use --fix to migrate to "${newTS}")`);
+        }
+      }
+    }
+
+    // Backfill sessionTimeline for verified projects that don't have it yet
+    if (isVerifiable && !data.sessionTimeline) {
+      if (canFix && !dryRun) {
+        try {
+          const logLines = readFileSync(buildLogPath, 'utf-8').split('\n').filter(l => l.trim());
+          const logEvents = logLines.map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+          const computed = computeTimingFromTracker(logEvents);
+          if (computed?.sessionTimeline?.length > 0) {
+            data.sessionTimeline = computed.sessionTimeline;
+            writeFileSync(metaPath, JSON.stringify(data, null, 2) + '\n');
+            logAction('fix-meta', `${slug}/meta.json — backfilled sessionTimeline (${computed.sessionTimeline.length} segments)`);
+          }
+        } catch { /* ignore */ }
+      }
+    }
+
     // Validate — one standard, all fields required, no version tiers
     for (const field of REQUIRED_META_FIELDS) {
       if (data[field] === undefined) {
@@ -1324,6 +1862,11 @@ function validateMetaJson(projectsDir, label) {
       }
     }
     for (const [block, children] of Object.entries(REQUIRED_META_BLOCKS)) {
+      // phaseTiming: null is valid when timing is estimated
+      if (block === 'phaseTiming' && data[block] === null && data.timingSource === 'estimated') {
+        logVerbose(`${slug}: phaseTiming: null (timingSource: estimated — valid)`);
+        continue;
+      }
       if (!data[block] || typeof data[block] !== 'object') {
         logError('meta', `${slug}/meta.json missing required block: ${block}`);
       } else {
@@ -1389,6 +1932,31 @@ function validateScroll(projectsDir, label) {
     if (/className="flex"(?!\s+h-full)/.test(src)) {
       const fixed = src.replace(/className="flex"/, 'className="flex h-full"');
       if (fixed !== src) { src = fixed; fixes.push('flex wrapper: added h-full'); }
+    }
+
+    // Root h-full overflow-hidden with no overflow-y-auto scroll container → content clips silently
+    // Fix: inject <div className="h-full overflow-y-auto"> after root open tag, close before root close
+    if (/className="[^"]*h-full[^"]*overflow-hidden/.test(src) && !/overflow-y-auto/.test(src)) {
+      // Step 1: inject scroll wrapper after the root opening div (first line after root open)
+      let fixed = src.replace(
+        /(className="[^"]*h-full[^"]*overflow-hidden[^"]*">)(\s*\n)(\s*)(<div )/,
+        (m, rootOpen, nl, indent, nextDiv) =>
+          `${rootOpen}${nl}${indent}<div className="h-full overflow-y-auto">${nl}${indent}${nextDiv}`
+      );
+      // Step 2: close the scroll wrapper — insert </div> before the final </div> that closes the root
+      // Pattern: last occurrence of `\n    </div>\n  );` (return close pattern)
+      if (fixed !== src) {
+        fixed = fixed.replace(
+          /(\n(\s+)<\/div>\n(\s+)<\/div>\n(\s+)\);)/,
+          (m, full, i1, i2, i3) => `\n${i1}</div>${full}`
+        );
+      }
+      if (fixed !== src) {
+        src = fixed;
+        fixes.push('root overflow-hidden: injected h-full overflow-y-auto scroll wrapper');
+      } else {
+        logWarn('scroll', `${slug} — root is overflow-hidden but has no overflow-y-auto scroll container; manual fix required`);
+      }
     }
 
     if (src !== origSrc) {
@@ -1936,7 +2504,35 @@ function validateVisibility(config, localConfig, publicProjectsDir) {
   }
 }
 
-// ─── 12. Build verification ──────────────────────
+// ─── 12. Orphaned build trackers ─────────────────
+
+function validateOrphanedTrackers() {
+  log('\n  ── Orphaned Build Trackers ──');
+  const dirs = getProjectDirs(PATHS.projectsDir);
+  const now = Date.now();
+  const MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+  for (const slug of dirs) {
+    const tp = trackerPath(slug);
+    if (!existsSync(tp)) continue;
+
+    const stat = statSync(tp);
+    const ageMs = now - stat.mtimeMs;
+    const ageHours = Math.round(ageMs / (60 * 60 * 1000) * 10) / 10;
+
+    if (ageMs > MAX_AGE_MS) {
+      if (canFix && !dryRun) {
+        logWarn('tracker', `${slug} — stale build-log.jsonl (${ageHours}h old, no session-end) — build may have been interrupted`);
+      } else {
+        logWarn('tracker', `${slug} has stale build-log.jsonl (${ageHours}h old, status: in-progress) — build may have been interrupted`);
+      }
+    } else {
+      logVerbose(`${slug} has active tracker (${ageHours}h old)`);
+    }
+  }
+}
+
+// ─── 13. Build verification ──────────────────────
 
 function verifyBuild() {
   log('\n  ── Build Verification ──');
@@ -1970,6 +2566,32 @@ function verifyBuild() {
 }
 
 // ═══════════════════════════════════════════════════
+//  VERSION SELF-CHECK
+//  Reads SKILL.md frontmatter version and errors if it
+//  diverges from the SKILL_VERSION constant in this file.
+//  Prevents session-start events from being stamped with
+//  a stale version when SKILL.md has been bumped.
+// ═══════════════════════════════════════════════════
+
+(function checkSkillVersion() {
+  const skillMdPath = join(__dirname, '..', 'SKILL.md');
+  if (!existsSync(skillMdPath)) return; // not in a skill context, skip
+  try {
+    const content = readFileSync(skillMdPath, 'utf-8');
+    const match = content.match(/^---[\s\S]*?^\s+version:\s*["']?([\d.]+)["']?\s*$/m);
+    if (match) {
+      const mdVersion = match[1];
+      if (mdVersion !== SKILL_VERSION) {
+        // Hard error — drift must be fixed before running
+        console.error(`\n[hub-gen] VERSION MISMATCH — hub-gen.mjs SKILL_VERSION is "${SKILL_VERSION}" but SKILL.md frontmatter version is "${mdVersion}".`);
+        console.error(`[hub-gen] Update SKILL_VERSION in hub-gen.mjs to "${mdVersion}" before running.`);
+        process.exit(1);
+      }
+    }
+  } catch { /* ignore read errors — skip check */ }
+})();
+
+// ═══════════════════════════════════════════════════
 //  DISPATCH
 // ═══════════════════════════════════════════════════
 
@@ -1986,6 +2608,9 @@ switch (command) {
   case 'add-project':
     addProject();
     break;
+  case 'remove-project':
+    removeProject();
+    break;
   case 'write-meta':
     writeMeta();
     break;
@@ -2001,6 +2626,12 @@ switch (command) {
   case 'doctor':
     // doctor is an alias for validate --fix
     validate();
+    break;
+  case 'track':
+    track();
+    break;
+  case 'track-read':
+    trackRead();
     break;
   default:
     logError('dispatch', `Unknown command: ${command}`);

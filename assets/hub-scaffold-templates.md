@@ -1,10 +1,10 @@
 # Hub Scaffold Templates
 
-These are the **exact files** the agent must produce when scaffolding a new Research Hub during Phase 0B-SCAFFOLD. Copy them verbatim, adjusting only the values marked with `<placeholder>`. After copying these files, run `node scripts/hub-gen.mjs <hub-path> scaffold` to generate shared components, ESLint config, and stamp `frameworkVersion`.
+These are the **exact files** the agent must produce when scaffolding a new Research Hub during Phase 0B-SCAFFOLD. Copy them verbatim, adjusting only the values marked with `<placeholder>`. After copying these files, run `node scripts/hub-gen.mjs <hub-path> scaffold` to generate shared components, ESLint config, and stamp `skillVersion`.
 
 **File classification — regenerable vs sacred:**
-- **Sacred (never overwritten by scripts):** `hub-config.json`, `src/App.jsx`, `src/components/HubHome.jsx`, `src/components/ProjectDetailFlyout.jsx`, `src/components/CompareView.jsx`, all project `components/*.jsx` and `data/*.js` files.
-- **Regenerable (safe to overwrite via hub-gen.mjs):** `src/projects/index.js`, `src/components/GlossaryTerm.jsx`, `src/components/CustomTooltip.jsx`, `src/components/InsightCallout.jsx`, `eslint.config.js`, project `App.jsx` shells.
+- **Sacred (never overwritten by scripts):** `hub-config.json`, all project `components/*.jsx` and `data/*.js` files, `src/collections/*/` directories.
+- **Regenerable (produced by skill, safe to regenerate):** `src/App.jsx`, `src/components/HubHome.jsx`, `src/components/ProjectDetailFlyout.jsx`, `src/components/CompareView.jsx`, `src/components/telemetryUtils.js`, `src/projects/index.js`, `src/components/GlossaryTerm.jsx`, `src/components/CustomTooltip.jsx`, `src/components/InsightCallout.jsx`, `eslint.config.js`, project `App.jsx` shells.
 
 **Key architecture notes:**
 - **Lightweight registries:** `projects/index.js` contains only metadata (slug, title, subtitle, query, lens, icon, accentColor, visibility, createdAt). Telemetry lives in per-project `meta.json` files and is lazy-loaded by HubHome on demand.
@@ -459,14 +459,20 @@ Landing page with two browsable areas: "My Research" (all user project cards wit
 
 **Extended Telemetry Flyout:** Each project card has a single `ChevronRight` detail button in the footer right side. Clicking it opens a `ProjectDetailFlyout` slide-in panel from the right with full telemetry breakdown (phase timeline, build profile radar, hours saved chart, content analysis, efficiency metrics, data quality, build stats, research plan). The flyout uses `fixed` positioning with `z-50` to escape any `overflow-hidden` ancestors. Clicking the card body (anywhere except the chevron or compare checkbox) navigates into the project. There is NO separate `ArrowRight` icon — the `ChevronRight` is the only arrow in the card footer.
 
-**Compare View:** Each project card has a compare checkbox in the **absolute top-right corner** (`top-2.5 right-2.5`), hidden by default (`opacity-0`) and revealed on hover (`group-hover:opacity-100`). Stays visible when checked. When 2+ projects are selected, a floating "Compare N projects" button appears at `fixed bottom-6 right-6`. Clicking it opens a `CompareView` overlay with side-by-side telemetry comparison using radar charts and bar charts.
+**Phase Timeline (in flyout):** The `PhaseTimeline` component accepts both `phaseTiming` and `sessionTimeline` props. For **verified** projects with `sessionTimeline` data (from `meta.json`), it renders the full session duration with interleaved human wait blocks (amber `#f59e0b` with diagonal stripe pattern) placed exactly where they occurred. For **estimated** projects (no `sessionTimeline`), it renders a phase-only bar using the sum of phase minutes as the denominator (not `durationMinutes`, to avoid empty space). **Tooltip:** Rendered as a sibling *above* the `overflow-hidden` bar container (not inside it) using a `ref` + mouse position tracking, clamped to stay within the bar's width. Each tooltip shows the full phase name (from `PHASE_NAMES`), a brief description (from `PHASE_DESCRIPTIONS`), and the duration with percentage. Wait segments show "Human Wait" with context ("checkpoint" vs "approval"). The legend below the bar lists all phases with their times, plus a "WAIT" entry with total wait minutes when wait segments are present. Import `PHASE_NAMES`, `PHASE_DESCRIPTIONS`, `PHASE_COLORS` from `telemetryUtils.js`.
+
+**Timing trust banner (in flyout):** At the top of the telemetry section, show a `timingSource` banner: green emerald for `"verified"` ("Verified timing — measured by build log") or gray for `"estimated"` ("~ Estimated timing — no build log; times are approximate"). The Build Time stat card also shows an inline badge (green `CheckCircle` for verified, gray `~` for estimated).
+
+**telemetryUtils.js:** Shared telemetry constants and helpers. Must export: `PHASE_ORDER` (8 phases), `PHASE_LABELS` (3-letter abbreviations), `PHASE_NAMES` (full names: Environment Setup, Interpret Prompt, Survey Landscape, Discover Sources, Deep Research, Analyze Findings, Build Dashboard, Present & Validate), `PHASE_DESCRIPTIONS` (brief descriptions of what each phase does), `PHASE_COLORS` (one color per phase), `computeDerivedMetrics`, `DERIVED_METRIC_META`, `getPhaseTimingData` (returns array with `phase`, `label`, `name`, `description`, `minutes`, `color`), `getProductionHoursData`, `getConsumptionData`, `getBuildProfileData`, `computeCompareRows`, `BLOOMS_COLORS`, `formatDuration`, `formatHours`.
+
+**Compare View:** Each project card has a compare checkbox in the **absolute top-right corner** (`top-2.5 right-2.5`), hidden by default (`opacity-0`) and revealed on hover (`group-hover:opacity-100`). Stays visible when checked. When 2+ projects are selected, a floating "Compare N projects" button appears at `fixed bottom-6 right-6`. Clicking it opens a `CompareView` overlay with side-by-side telemetry comparison using radar charts and bar charts. **Timing trust indicators:** In the Phase Timeline Comparison, estimated projects have 50% opacity bars and a `~` next to duration; verified projects show a green `CheckCircle`. In the CompareTable, column headers show ✓ or ~ per project, and all Timing category cell values for estimated projects are dimmed (`text-gray-600`) and prefixed with `~`.
 
 **Card root element:** `ProjectCard` uses a `<div>` with `role="button"` and `tabIndex={0}` instead of a `<button>` element. This is required because the card contains interactive children (compare checkbox, detail chevron) — nested `<button>` elements inside a `<button>` are invalid HTML and browsers will not fire click events on the inner elements.
 
 ```jsx
 import React, { useState } from 'react';
 import {
-  FlaskConical, Sparkles, Clock, Search, BarChart3,
+  FlaskConical, Sparkles, Clock, Search, BarChart3, CheckCircle,
   FileText, Database, Package, Timer, BookOpen, Zap, GraduationCap, Brain, Eye,
   Library, Users, HardDrive, GitBranch, Globe, ChevronRight,
 } from 'lucide-react';
@@ -515,6 +521,21 @@ function TelemetryStat({ icon: Icon, value, label, className = '' }) {
       <Icon className="w-3 h-3 text-gray-600 flex-shrink-0" />
       <span className="text-[10px] text-gray-500">{value}</span>
     </div>
+  );
+}
+
+function TimingBadge({ timingSource }) {
+  const isVerified = timingSource === 'verified';
+  return (
+    <span
+      className={`inline-flex items-center gap-0.5 text-[9px] font-medium ${isVerified ? 'text-emerald-400' : 'text-gray-500'}`}
+      title={isVerified ? 'Timing verified by build log' : 'Timing is an AI estimate'}
+    >
+      {isVerified
+        ? <CheckCircle className="w-2.5 h-2.5" />
+        : <span className="text-[10px] leading-none">~</span>
+      }
+    </span>
   );
 }
 
@@ -669,7 +690,11 @@ function ProjectCard({ project, onProjectClick, getAccent, formatDate, ProjectIc
           </div>
           {/* Build stats */}
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-            <TelemetryStat icon={Timer} value={formatDuration(t.durationMinutes)} label="AI build time" />
+            <div className="flex items-center gap-1" title={t.timingSource === 'verified' ? 'Build time verified by build log' : 'Build time is an AI estimate'}>
+              <Timer className="w-3 h-3 text-gray-600 flex-shrink-0" />
+              <span className="text-[10px] text-gray-500">{formatDuration(t.durationMinutes)}</span>
+              <TimingBadge timingSource={t.timingSource} />
+            </div>
             <TelemetryStat icon={Search} value={t.searchesPerformed} label="Web searches" />
             <TelemetryStat icon={BookOpen} value={t.sourcesCount} label="Sources cited" />
             <TelemetryStat icon={BarChart3} value={t.chartsBuilt} label="Charts built" />

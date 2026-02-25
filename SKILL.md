@@ -12,489 +12,303 @@ license: MIT
 compatibility: Requires internet access for web search and data fetching.
 metadata:
   author: mrshaun13
-  version: "8.0"
+  version: "8.10"
 ---
 
 # Deep Research → Interactive Dashboard Pipeline
 
 Takes a simple research topic from a user, autonomously discovers dimensions, metrics, subgroups, and taxonomies, then produces an interactive web dashboard.
 
-**Extension System** — Specialized workflows (product comparisons, incident reviews, sprint analyses) are handled by pluggable extensions that auto-detect from user prompts and augment the pipeline with domain-specific logic. Extensions support two output modes: **bespoke** (unique React dashboards) and **template** (shared component + JSON data for high-volume structured reports). See [extensions/registry.md](extensions/registry.md).
-
-## Design Philosophy
-
-**The user provides:** A topic in natural language (1-2 sentences).
-**The agent handles:** Research scoping, subgroup discovery, metric identification, taxonomy compilation, data gathering, visualization selection, and dashboard construction.
-
-## Pipeline
+**Extension System** — Specialized workflows (product comparisons, incident reviews, sprint analyses) are handled by pluggable extensions that auto-detect from user prompts and augment the pipeline. See [extensions/registry.md](extensions/registry.md).
 
 ```
 ENVIRONMENT CHECK → INTERPRET → SURVEY → DISCOVER → RESEARCH → ANALYZE → BUILD → ENRICH → PRESENT
-       ↓                ↓                               ↓                          ↓
-  Hub exists?       Extension?                   User Checkpoint          Key Term Glossary
-    ↓ no               ↓ yes                                               (always on)
+       ↓                ↓                     ↓                                ↓
+  Hub exists?       Extension?         User Checkpoint                   Glossary (always on)
+    ↓ no               ↓ yes
   FIRST-TIME SETUP  Extension Phase 1B
-                      (inject: classify, scope, configure)
 ```
 
 ---
 
-## Phase 0: ENVIRONMENT CHECK — Detect or Set Up Research Hub
+## Phase 0: ENVIRONMENT CHECK
 
-Before any research begins, check whether the Research Hub is already installed. The hub is a single web application that hosts ALL research dashboards in one place, eliminating the need for multiple dev servers and installs.
+See [hub-architecture.md](references/hub-architecture.md) for config schema, directory structure, and project registry.
 
-See [hub-architecture.md](references/hub-architecture.md) for the complete config schema, directory structure, and project registry format.
+### Config (Two-Layer)
 
-### Config Architecture (Two-Layer)
-
-The skill uses a **two-layer config** to make the entire setup portable across machines:
-
-1. **Pointer config** (machine-local, `~/.codeium/windsurf/skills/research-visualizer/config.json`):
-   - Contains ONLY `personalHubPath` — the absolute path to the user's personal hub repo on this machine.
-   - This is the **installation detection marker**. If it exists, the hub has been set up on this machine.
-   - Never committed to any repo.
-
-2. **Portable config** (`<personalHubPath>/hub-config.json`, git-synced):
-   - Contains everything else: port, gitRepo, libraries array, projects array, telemetry.
-   - Committed to the personal hub repo — syncs across machines automatically via git.
-   - The personal hub repo IS the portable unit: clone it on a new machine, point the skill at it, done.
-
-3. **Machine-local vite config** (`<personalHubPath>/.local-config.json`, gitignored):
-   - Contains machine-specific library paths for Vite aliases (e.g., where the public library is cloned locally).
-   - Created by the skill during Phase 0 setup. Read by `vite.config.js` at dev server startup.
-   - Supports multiple libraries via an array of `{ name, alias, localPath }` entries.
+1. **Pointer config** (`~/.codeium/windsurf/skills/research-visualizer/config.json`): Machine-local. Contains only `personalHubPath`. Installation detection marker.
+2. **Portable config** (`<personalHubPath>/hub-config.json`): Git-synced. Port, gitRepo, libraries, projects, telemetry.
+3. **Machine-local vite config** (`<personalHubPath>/.local-config.json`): Gitignored. Library paths for Vite aliases.
 
 ### No-Topic Invocation
 
-If the user invokes the skill **without a research topic** (e.g., "start research hub", "open my research", "browse the library"):
-- Run Detection and setup as normal (Phase 0, 0B, 0C as needed)
-- Start the dev server if not running, open browser preview
-- **Do NOT proceed to Phase 1** — the user just wants to browse. Inform them: "Your Research Hub is running. You can browse your local research and any configured libraries."
+If invoked without a topic: run detection/setup, start dev server, open browser preview, **stop** — do NOT proceed to Phase 1.
 
 ### Detection
 
-1. **Check for pointer config:** `~/.codeium/windsurf/skills/research-visualizer/config.json`
-2. **If pointer exists:**
-   - Read `personalHubPath` from pointer
-   - Read `hub-config.json` from `<personalHubPath>/hub-config.json` for all portable settings
-   - **Git sync (personal):** If the hub has a `.git` remote, run `git pull` (stash first if uncommitted changes). Note if new projects were pulled.
-   - **Library sync:** For each library in `hub-config.json` `libraries` array where `browseEnabled` is true, check if `.local-config.json` has a `localPath` for it. If so, run `git -C <localPath> pull` to fetch latest community research.
-   - Check if Vite dev server is running on configured port (default 5180)
-   - If no topic provided → start server if needed, open browser, stop here
-   - If topic provided → **Skip to Phase 1**
-3. **If pointer does NOT exist → First-Time Setup (Phase 0B)**
+> **Track:** Derive slug (kebab-case) from topic immediately. Batch in one command:
+> ```bash
+> node $GEN $HUB track <slug> session-start 2>&1 | tail -1 && \
+> node $GEN $HUB track <slug> phase-start environment 2>&1 | tail -1
+> ```
 
-### Phase 0B: First-Time Setup
-
-This runs ONCE per machine. The goal is to either clone an existing personal hub or scaffold a new one, then create the machine-local pointer.
-
-1. **Inform the user immediately:**
-   > "I see this is your first time running Research Visualizer on this machine. I'll set up a **Research Hub** — a single web app that will host all your research dashboards in one place. You'll never need multiple dev servers again."
-
-2. **Ask about existing hub:**
-   > "Do you have an existing personal Research Hub git repo from another machine? If so, I can clone it and you'll have all your previous research, settings, and library configs instantly. If not, I'll create a fresh one."
-
-   - **If the user provides a git repo URL → Phase 0B-CLONE**
-   - **If the user says no / skip → Phase 0B-SCAFFOLD**
-
-#### Phase 0B-CLONE: Clone Existing Hub
-
-1. **Ask for install location:** Default: `~/git/personal-research-hub/`
-2. **Clone the repo:** `git clone <repo-url> <chosen-path>`
-3. **Run `npm install`** in the cloned directory
-4. **Read `hub-config.json`** from the cloned repo — this has all projects, library configs, and settings already.
-5. **Create pointer config** at `~/.codeium/windsurf/skills/research-visualizer/config.json`:
-   ```json
-   { "personalHubPath": "<chosen-path>" }
+1. Check pointer config exists
+2. **If exists:** Read `personalHubPath` → read `hub-config.json` → `git pull` (stash if needed) → sync libraries (`git -C <localPath> pull` for each with `browseEnabled: true`) → check dev server on port → if no topic, start server + stop; if topic, run batch then → **Phase 1**:
+   ```bash
+   node $GEN $HUB track <slug> phase-end environment 2>&1 | tail -1 && \
+   node $GEN $HUB track <slug> phase-start interpret 2>&1 | tail -1
    ```
-6. **Create `.local-config.json`** in the hub directory — for each library in `hub-config.json` `libraries` array where `browseEnabled` is true, ask the user where the library is cloned (or offer to clone it). Populate the `libraries` array with `{ name, alias, localPath }` entries.
-7. **Inform the user:** "Cloned your Research Hub with N existing projects and M library connections."
-8. **Continue to Phase 0B-LIBRARIES.**
-
-#### Phase 0B-SCAFFOLD: Create Fresh Hub
-
-1. **Ask for hub location:** Default: `~/git/personal-research-hub/`
-2. **Create the hub directory** and copy scaffold files verbatim from [hub-scaffold-templates.md](assets/hub-scaffold-templates.md): `package.json`, `vite.config.js`, `tailwind.config.js`, `postcss.config.js`, `index.html`, `src/main.jsx`, `src/index.css`, `src/App.jsx`.
-3. **Create `hub-config.json`** in the hub directory — set `version: "3.0"`, `frameworkVersion: "8.0"`, `port: 5180`, `gitRepo` (or null), empty `libraries` array, empty `projects` array, empty `collections` array.
-4. **Run `node scripts/hub-gen.mjs <hub-path> scaffold`** — this generates: shared components (`GlossaryTerm`, `CustomTooltip`, `InsightCallout`), ESLint config, devDependencies, project registry, and stamps `frameworkVersion` in hub-config.json.
-5. **Run `npm install`** in the hub directory.
-6. **Initialize git repo:** `git init`, `git branch -m main`, `.gitignore` (node_modules/, dist/, .DS_Store, *.local, .local-config.json). Ask about connecting a remote — if provided, push; if skipped, local only.
-7. **Create pointer config** at `~/.codeium/windsurf/skills/research-visualizer/config.json`:
-   ```json
-   { "personalHubPath": "<chosen-path>" }
-   ```
-8. **Create empty `.local-config.json`** in the hub directory: `{ "libraries": [] }`
-9. **Continue to Phase 0B-LIBRARIES.**
-
-### Phase 0B-LIBRARIES: Library Setup (One-Time Per Library)
-
-**Skip if `hub-config.json` already has a non-empty `libraries` array.** This phase handles both browsing AND contributing for each library. Multiple libraries can be configured.
-
-For each library the user wants to add (start with the default Community Research Hub):
-
-1. **Ask about browsing:**
-   > "Would you like to browse the **Community Research Hub**? Community-contributed dashboards you can explore alongside your own. No account needed — it's a public repo."
-
-2. **If yes to browsing:**
-   - Clone read-only: `git clone https://github.com/mrshaun13/research-hub.git <hubPath>/../research-hub` (or ask user for location)
-   - Add library entry to `hub-config.json` `libraries` array with `browseEnabled: true`
-   - Add entry to `.local-config.json` `libraries` array with `{ name, alias: "@public-library", localPath: "<clone-path>" }`
-   - Run `npm install` in the library clone if needed
-
-3. **Ask about contributing:**
-   > "Would you also like to **contribute** your research back to this library? Zero effort after a one-time setup — your agent pushes via the GitHub API after each build."
-
-4. **If yes to contributing:**
-   - Capture `git config user.name` (for slug collision avoidance)
-   - Ask for the contributor PAT (from the library maintainer). **Note:** The user does NOT need their own GitHub account or any git setup. The PAT is all that's needed — the agent uses the GitHub API directly.
-   - Update the library entry in `hub-config.json`: set `contributeEnabled: true`, `confirmEachShare: true`, `token`, `gitUsername`, `branch: "agent-contributions"`
-   - **Defaults:** `contributeEnabled` is `false` until the user explicitly provides a library remote AND a valid PAT. `confirmEachShare` defaults to `true` — the agent always asks before sharing. Users can set `confirmEachShare: false` later for auto-share (power-user opt-in).
-
-5. **If no to browsing:** Add library entry with `browseEnabled: false`. User can enable later.
-6. **If no to contributing:** Set `contributeEnabled: false` in the library entry. User can opt in later.
-
-7. **Ask if the user wants to add another library:**
-   > "Do you have any other shared research libraries to connect? (You can always add more later.)"
-   - If yes → repeat steps 1-6 for the new library
-   - If no → continue
-
-8. **Continue to Phase 1** (or stop here if no topic was provided).
+3. **If not exists → [First-Time Setup](references/first-time-setup.md)** (runs ONCE per machine — clone or scaffold hub, configure libraries)
 
 ### Key Principles
 
-- **No feature depends on another.** A user with zero GitHub setup gets a fully functional local research hub. Git sync, library browsing, and contribution are all independently optional.
-- **Phase 0 should be fast.** If the hub exists, it's a 2-second check (read pointer → read hub-config → git pull → go). If it's first-time, the setup conversation is brief and then research proceeds normally.
-- **Telemetry:** Initialize the telemetry object at the start of Phase 0. See [hub-architecture.md](references/hub-architecture.md#telemetry-schema) for the complete schema, capture timing, and formulas.
+- No feature depends on another. Zero GitHub setup → fully functional local hub.
+- Phase 0 should take ~2 seconds when hub exists.
+- See [hub-architecture.md § Telemetry](references/hub-architecture.md#telemetry-schema) for schema and formulas.
+
+### Build Log (Optional)
+
+Phase timing via `build-log.jsonl`. `write-meta` reads build log → computes timing → writes `session-end` → **preserves** the file as a permanent committed artifact. AI provides **zero timing data**.
+
+**Opt-out:** Phase timing is on by default. User can say **"skip timing"** at any point to disable for the current project.
+1. First track batch: run with `SafeToAutoRun: true`. Note to user: *"Phase timing enabled. Say **skip timing** to disable."*
+2. Auto-run succeeds → no further prompts needed.
+3. Manual approval required → remind on each: *"Say **skip timing** to stop these prompts."*
+4. On skip → stop all `track` commands. At `write-meta`, pass `"phaseTiming": null`. `write-meta` will set `timingSource: "estimated"` automatically (no build log).
+
+**When disabled:** Skip all `> **Track**` blocks throughout the phases.
+
+**When enabled:**
+- `track <slug> phase-start <phase>` / `phase-end <phase>` at every boundary.
+- `track <slug> user-prompt discover checkpoint` before and `user-response discover checkpoint` after.
+- Chain in one `run_command` using `&&`, up to 6 per command. Set `GEN` and `HUB` as shell vars in the first command.
+```bash
+node $GEN $HUB track <slug> phase-end <A> 2>&1 | tail -1 && \
+node $GEN $HUB track <slug> phase-start <B> 2>&1 | tail -1 && \
+node $GEN $HUB track <slug> phase-end <B> 2>&1 | tail -1 && \
+node $GEN $HUB track <slug> phase-start <C> 2>&1 | tail -1
+```
+- Always set `SafeToAutoRun: true` on `track` commands. No other `hub-gen.mjs` subcommands qualify.
+
+Derive slug in Phase 1 (kebab-case, same as `add-project`). For resumed sessions: `track-read <slug> --json`. See [hub-architecture.md § Build Log](references/hub-architecture.md#build-log-v81) for the full event table.
 
 ---
 
 ## Phase 1: INTERPRET — Understand Intent
 
-Parse natural language into research parameters. No structured input required.
+> **Track:** Batched with `phase-end environment` from Phase 0 (no separate command needed if chained).
 
-**Valid inputs:**
-- "How has homeownership changed in America since the 1950s?"
-- "Research the rise and fall of shopping malls in the US"
-- "Compare remote work vs office work outcomes since COVID"
-- "How has commercial aviation safety improved over time?"
-- "I'm looking to buy a boat for weekend fishing" *(triggers product-purchase extension)*
-- "Analyze the last 5 incidents for my team" *(triggers incident-review extension, if installed)*
-
-### Steps:
-
-1. **Extract core topic** — what is being studied?
-2. **Extract implied populations** — map casual references to researchable groups:
-   - "shopping malls" → retail industry, consumers, commercial real estate (subgroups TBD)
-   - "people as far back as the 50s" → population cohorts from ~1950 onward
-3. **Extract time scope** — map to temporal boundaries (do NOT choose segmentation yet):
-   - "over time" → full available historical range
-   - "since the 60s" → 1960-present
-4. **Extract research intent** — trends over time? group comparison? impact analysis?
-5. **Classify into research lenses** (triggers automatic dimensions in Phase 3):
-   - **Population lens** → demographics, health, economic, social
-   - **Behavior lens** → prevalence, taxonomy, outcomes
-   - **Industry lens** → market size, revenue, worker conditions
-   - **Culture lens** → societal shifts over time, media, public opinion
-   - Most topics combine 2-3 lenses.
+Parse natural language into research parameters:
+1. **Core topic** — what is being studied?
+2. **Implied populations** — map casual references to researchable groups
+3. **Time scope** — temporal boundaries (do NOT choose segmentation yet)
+4. **Research intent** — trends? comparison? impact analysis?
+5. **Research lenses** — Population (demographics, health) · Behavior (prevalence, outcomes) · Industry (market, revenue) · Culture (shifts, media). Most topics combine 2-3.
 
 ### Extension Detection
 
-After extracting the core research parameters, scan the user's prompt against all installed extension triggers from [extensions/registry.md](extensions/registry.md).
+Scan prompt against [extensions/registry.md](extensions/registry.md) triggers. If matched, load `EXTENSION.md` — it may inject Phase 1B before Phase 2.
 
-For each extension, check:
-- **Explicit triggers** — direct keyword matches in the user's prompt
-- **Implicit triggers** — indirect signals (mentions of related concepts)
-- **Context** — overall intent alignment
+**Output:** Topic, populations, time scope, intent, lenses, active extension. → Phase 2.
 
-If an extension matches, load its `EXTENSION.md` for phase-specific instructions. The extension may inject a Phase 1B (classification/scoping step) before Phase 2.
-
-**Output:** Topic, populations, time scope, intent, lenses, active extension (if any). If an extension with Phase 1B is active, run its injected phase next. Otherwise, proceed directly to Phase 2.
+> **Track (batch):**
+> ```bash
+> node $GEN $HUB track <slug> phase-end interpret 2>&1 | tail -1 && \
+> node $GEN $HUB track <slug> phase-start survey 2>&1 | tail -1
+> ```
 
 ---
 
 ## Phase 2: SURVEY — Broad Landscape Scan
 
-Understand the research landscape before diving deep.
+1. **3-5 broad searches:** "[topic] research overview", "[topic] major studies statistics", "[topic] trends data [time scope]", "[population] demographics research", "[topic] systematic review OR meta-analysis"
+2. **Identify:** Major datasets, commonly measured dimensions, known subgroups, temporal inflection points, data availability
+3. **Temporal segmentation** — pick the lens where data looks *different* on either side of the boundary: inflection-point eras > policy eras > technology eras > decades > generations
 
-### Steps:
+**Extension hook:** Load Phase 2 instructions if active.
 
-1. **Conduct 3-5 broad searches:**
-   - "[topic] research overview"
-   - "[topic] major studies statistics"
-   - "[topic] trends data [time scope]"
-   - "[population] demographics research"
-   - "[topic] systematic review OR meta-analysis"
-
-2. **Identify from results:**
-   - Major studies and datasets that exist
-   - Commonly measured dimensions
-   - Known subgroups in existing research
-   - Temporal inflection points
-   - Data availability (rich vs sparse areas)
-
-3. **Determine temporal segmentation** — choose the lens that reveals the most interesting story, not the most obvious one:
-   - **Inflection-point eras** — segment around pivotal events, inventions, or crises that changed the trajectory (often the most narratively compelling)
-   - **Policy/regulatory eras** — when laws, regulations, or institutional changes drove the shifts
-   - **Technology eras** — when new technology created before/after discontinuities
-   - **Decades** — neutral, works for any topic, good default when no clear inflection points exist
-   - **Generations** — only when the research is explicitly about age-cohort identity or attitudes
-   
-   **Guiding principle:** The best segmentation is the one where the data looks *different* on either side of the boundary. If a timeline split doesn't reveal a meaningful change, it's the wrong split.
-
-**Extension hook (augment):** If an extension is active, load its Phase 2 instructions for additional search patterns and segmentation strategies specific to the extension's domain.
-
-**Output:** Major data sources, preliminary dimensions, temporal segmentation. Proceed to Phase 3.
+> **Track (batch):**
+> ```bash
+> node $GEN $HUB track <slug> phase-end survey 2>&1 | tail -1 && \
+> node $GEN $HUB track <slug> phase-start discover 2>&1 | tail -1
+> ```
 
 ---
 
-## Phase 3: DISCOVER — Autonomous Dimension Discovery
-
-This is where the skill becomes intelligent — discovering what the user would have had to specify manually.
+## Phase 3: DISCOVER — Dimension Discovery
 
 ### 3A: Subgroup Discovery
+Split test: >20% difference → SPLIT; <20% → MERGE. Max 2 levels, 5 subgroups. See [subgroup-discovery.md](references/subgroup-discovery.md).
 
-1. Start with broadest grouping from Phase 1
-2. Search for: "types of [group]" OR "[group] subcategories"
-3. For each candidate subgroup, apply the split test:
-   - **>20% difference** on key metrics → SPLIT (different stories)
-   - **<20% difference** across all metrics → MERGE (noise without insight)
-4. Bounds: max 2 levels deep, max 5 subgroups per population
-
-See [subgroup-discovery.md](references/subgroup-discovery.md) for the full decision matrix.
-
-### 3B: Core Metric Identification
-
-Apply the **Standard Research Dimensions Framework** based on lenses from Phase 1. Universal dimensions (temporal trends, demographics, baseline comparison) are ALWAYS included. Lens-specific dimensions are added automatically.
-
-See [research-dimensions.md](references/research-dimensions.md) for the complete framework.
+### 3B: Core Metrics
+Apply Standard Research Dimensions Framework per lenses. See [research-dimensions.md](references/research-dimensions.md).
 
 ### 3C: Taxonomy Discovery
+Search academic taxonomies, cross-reference 2-3 sources, trim to top 25-30. See [subgroup-discovery.md](references/subgroup-discovery.md).
 
-For each dimension with categorical subtypes:
-1. Search for academic taxonomies and platform categorizations
-2. Cross-reference 2-3 sources into unified list of 25-30 items
-3. Rank by data availability, trim to top 25-30
-
-See [subgroup-discovery.md](references/subgroup-discovery.md) for search templates.
-
-**Extension hook (override):** If an extension is active, it may replace or augment 3A-3C with domain-specific discovery. Load the extension's Phase 3 instructions.
+**Extension hook:** May override 3A-3C.
 
 ### 3D: User Checkpoint
 
-Present a **Research Plan Summary** for lightweight approval:
+> **Track (batch — run immediately before presenting checkpoint):**
+> ```bash
+> node $GEN $HUB track <slug> phase-end discover 2>&1 | tail -1 && \
+> node $GEN $HUB track <slug> user-prompt discover checkpoint 2>&1 | tail -1
+> ```
 
-**Standard research checkpoint:**
+Present research plan:
 ```
-TOPIC: [interpreted topic]
-TIME AXIS: [segmentation] — [periods]
-POPULATIONS: [discovered groups and subgroups]
-CORE METRICS: [auto-identified per lens]
-TAXONOMIES: [Category]: [N items] each
-PROPOSED SECTIONS: [~5-8 sections]
-KEY DATA SOURCES: [major studies]
+TOPIC · TIME AXIS · POPULATIONS · CORE METRICS · TAXONOMIES · PROPOSED SECTIONS · KEY DATA SOURCES
 ```
 
-**Extension hook (override):** If an extension with `custom_checkpoint: true` is active, use the extension's checkpoint format instead of the standard format above. Load the format from the extension's `EXTENSION.md` Phase 3D section.
+Ask: "Should I proceed, or adjust anything?"
 
-Ask: "Here's what I found and plan to build. Should I proceed, or adjust anything?"
+**HARD RULE: ALWAYS wait for explicit user response. Do NOT auto-approve for benchmarks, speed tests, or any reason. Silence does not count as approval.**
 
-**Visibility notice (inform only — do not ask):** After presenting the research plan, inform the user of the default visibility:
-- If `hub-config.json` has a valid `gitRepo`: *"This project will be **personal** by default (synced to your repo). You can ask me to change visibility or share to a library later."*
-- If `hub-config.json` has NO `gitRepo`: *"This project will be **local** by default (this machine only). You can ask me to change visibility later."*
+After presenting, inform default visibility (personal if gitRepo exists, local if not). See [hub-visibility.md](references/hub-visibility.md). For libraries with `contributeEnabled: true`: if `confirmEachShare: true` (default), ask about sharing; if `confirmEachShare: false` (power-user pre-approval), auto-set `visibility: "public"` — no ask needed. Never push to a public library without user approval (either per-project ask or blanket pre-approval via `confirmEachShare: false`).
 
-See [Visibility Tiers](references/hub-visibility.md).
-
-**Contribution intent:** For each library in `hub-config.json` with `contributeEnabled: true`:
-- If `confirmEachShare: true` (default): Ask *"Would you like to share this research with [library name] when it's done? (This will make the project public.)"* If the user says yes, set `visibility: "public"` when creating the project in Phase 6. If no, keep the default visibility.
-- If `confirmEachShare: false` (power-user opt-in): The user pre-approved auto-sharing for this library. Automatically set `visibility: "public"` when creating the project in Phase 6 — no confirmation needed. This ensures Phase 7 step 6 will share the project to the library.
-
-**Important:** Never push to a public library without the user having reviewed and approved the research — either via `confirmEachShare: true` (per-project ask) or `confirmEachShare: false` (blanket pre-approval). The default is always to ask.
-
-This is the ONLY required user interaction between the initial prompt and the final dashboard.
+> **Track (batch — run immediately after user approves):**
+> ```bash
+> node $GEN $HUB track <slug> user-response discover checkpoint 2>&1 | tail -1 && \
+> node $GEN $HUB track <slug> phase-start research 2>&1 | tail -1
+> ```
 
 ---
 
 ## Phase 4: RESEARCH — Deep Data Gathering
 
-Gather data for every cell in the dimension matrix.
+1. For each metric × group × time period, search and extract statistics
+2. Tag every data point with quality tier (T1 Gold → T4 Estimate)
+3. Triangulate — 2-3 independent sources per data point
+4. Fill gaps with T4 estimates, clearly marked
+5. Gather taxonomy prevalence per group × period
+6. Track all sources in structured citation list
 
-1. **For each metric × group × time period**, search and extract statistics
-2. **Tag every data point** with a quality tier (T1 Gold → T4 Estimate)
-3. **Triangulate** — 2-3 independent sources per data point when possible
-4. **Fill gaps** with informed estimates, clearly marked as T4
-5. **For each taxonomy** — gather prevalence per group × period (produces heatmap matrices)
-6. **Track all sources** in structured citation list
+See [subgroup-discovery.md](references/subgroup-discovery.md) for tier definitions. **Extension hook:** Load Phase 4 if active.
 
-See [subgroup-discovery.md](references/subgroup-discovery.md) for data quality tier definitions.
-
-**Extension hook (augment):** If an extension is active, load its Phase 4 instructions for domain-specific data gathering patterns.
-
----
-
-## Phase 5: ANALYZE — Data-Driven Story & Visualization
-
-Visualization decisions are made HERE — after seeing the data, not before.
-
-### 5A: Key Findings
-For each dataset: most surprising finding, biggest group differences, clearest trends, counterintuitive results. These become insight callouts.
-
-### 5B: Auto-Select Visualizations
-Map each dataset to optimal chart type using deterministic rules (same data shape → same chart type, always).
-
-See [visualization-rules.md](references/visualization-rules.md) for the complete mapping table.
-
-### 5C: Dashboard Structure
-Organize by narrative flow:
-1. **Broad** — overview metrics, population sizes, temporal context
-2. **Deep** — subgroup demographics, career, economics
-3. **Compare** — health, social, economic outcomes across groups
-4. **Explore** — heatmaps and ranked lists for discovered taxonomies
-5. **Context** — related societal metrics
-6. **Sources** — citations, methodology, limitations
-
-Each section: title + subtitle + 1-3 chart cards + insight callout + filters where applicable.
-
-**Extension hook (augment):** If an extension is active, load its Phase 5 instructions for domain-specific analysis patterns, visualization selection, and dashboard structure.
+> **Track (batch):**
+> ```bash
+> node $GEN $HUB track <slug> phase-end research 2>&1 | tail -1 && \
+> node $GEN $HUB track <slug> phase-start analyze 2>&1 | tail -1
+> ```
 
 ---
 
-## Phase 6: BUILD — Build Into Research Hub
+## Phase 5: ANALYZE — Story & Visualization
 
-All outputs are built into the Research Hub — a single web application that hosts all research dashboards and collections. **Never create a standalone Vite project.** The hub was set up in Phase 0.
+Decisions made HERE, after seeing the data.
 
-See [hub-architecture.md](references/hub-architecture.md) for the hub directory structure, config schema, and project registry format.
-See [build-templates.md](assets/build-templates.md) for data schemas, component patterns, and design principles.
-See [collections-architecture.md](references/collections-architecture.md) for template-mode collection structure and rendering.
+- **5A:** Key findings — surprises, group differences, trends, counterintuitive results → insight callouts
+- **5B:** Auto-select chart types per [visualization-rules.md](references/visualization-rules.md)
+- **5C:** Structure: Broad → Deep → Compare → Explore → Context → Sources. Each section: title + subtitle + 1-3 charts + insight callout.
 
-### Output Mode: Bespoke (default)
+**Extension hook:** Load Phase 5 if active.
 
-Standard pipeline — each run produces a unique React project. **hub-gen.mjs handles all structural work; the AI writes only creative content (section components and data files).**
+> **Track (batch):**
+> ```bash
+> node $GEN $HUB track <slug> phase-end analyze 2>&1 | tail -1 && \
+> node $GEN $HUB track <slug> phase-start build 2>&1 | tail -1
+> ```
 
-#### Steps:
+---
 
-1. **Read pointer config** (`~/.codeium/windsurf/skills/research-visualizer/config.json`) to get `personalHubPath`
-2. **Read `hub-config.json`** from `<personalHubPath>/hub-config.json` for port and project list
-3. **Generate a slug** for the new project (kebab-case from topic, e.g., "cisco-history-dashboard")
-4. **Run `node scripts/hub-gen.mjs <hub-path> add-project --json '<payload>'`** with a JSON payload containing: `slug`, `title`, `subtitle`, `query`, `lens`, `icon`, `accentColor`, `visibility`, `createdAt`, `sections` (array of section names like `["Overview", "Demographics", "Trends", "Sources"]`).
-   - This single command: creates the project directory + `components/` + `data/`, generates the `App.jsx` shell with sidebar nav and section routing, updates `hub-config.json`, and regenerates the project registry — all in ~2 seconds.
-   - Parse the `--json` output for `createdPaths` to know where to write creative content.
-   - See [Visibility Tiers](references/hub-visibility.md#the-three-tiers) for visibility rules.
-5. **AI writes creative content** into the project directory:
-   - `components/*.jsx` — section components with charts, data visualizations, insight callouts. Import shared components from `../../components/` (e.g., `import CustomTooltip from '../../components/CustomTooltip'`, `import InsightCallout from '../../components/InsightCallout'`).
+## Phase 6: BUILD — Into Research Hub
+
+**Never create a standalone Vite project.** See [hub-architecture.md](references/hub-architecture.md), [build-templates.md](assets/build-templates.md), [collections-architecture.md](references/collections-architecture.md).
+
+### Bespoke Mode (default)
+
+**hub-gen.mjs handles structure; AI writes only creative content.**
+
+1. Read pointer config → get `personalHubPath`
+2. Read `hub-config.json` for port and project list
+3. Generate slug (kebab-case)
+4. **`node scripts/hub-gen.mjs <hub-path> add-project --json '<payload>'`** — payload: `slug`, `title`, `subtitle`, `query`, `lens`, `icon`, `accentColor`, `visibility`, `createdAt`, `sections`. Creates directory, App.jsx, updates config + registry. Parse `--json` output for `createdPaths`.
+5. **AI writes creative content:**
+   - `components/*.jsx` — sections with charts, callouts. Import shared components from `../../../components/`.
    - `data/*.js` — research data as ES module exports.
-   - This is the **only part where AI generation time is spent**.
-6. **Run `node scripts/hub-gen.mjs <hub-path> install-components`** — ensures shared `GlossaryTerm`, `CustomTooltip`, `InsightCallout` are in `src/components/`.
-7. **Check dev server status:**
-   - If Vite is already running on the hub port → tell user to refresh their browser (Vite HMR will pick up new files)
-   - If Vite is NOT running → start it from `<personalHubPath>`: `npm run dev`
-8. **Open browser preview** on the hub's port
+6. **`node scripts/hub-gen.mjs <hub-path> install-components`**
+7. Check dev server (running → refresh; not running → `npm run dev`)
+8. Open browser preview
 
-**Extension hook (augment):** If an extension is active, load its Phase 6 instructions for domain-specific file structure, component patterns, and build order.
+> **Track (batch):**
+> ```bash
+> node $GEN $HUB track <slug> phase-end build 2>&1 | tail -1 && \
+> node $GEN $HUB track <slug> phase-start enrich 2>&1 | tail -1
+> ```
 
-#### Project File Structure (within the hub):
+#### Shared Component Reference
 
-```
-<hubPath>/src/projects/<slug>/
-├── App.jsx                    # Generated by hub-gen.mjs add-project (do not write manually)
-├── meta.json                  # Telemetry + run metadata (written by hub-gen.mjs write-meta in Phase 7)
-├── components/
-│   ├── Overview.jsx           # AI-written section component
-│   ├── [SectionName].jsx      # AI-written additional sections
-│   └── Sources.jsx            # AI-written methodology, disclaimers
-└── data/
-    └── researchData.js        # AI-written research data as ES module exports
+**Import path: `../../../components/`** — that's 3 levels up from `src/projects/<slug>/components/`. NOT 2.
 
-<hubPath>/src/components/       # Shared components (installed by hub-gen.mjs install-components)
-├── GlossaryTerm.jsx           # Inline term flyout — import from '../../components/GlossaryTerm'
-├── CustomTooltip.jsx          # Dark-themed chart tooltips — import from '../../components/CustomTooltip'
-└── InsightCallout.jsx         # Colored callout boxes — import from '../../components/InsightCallout'
-```
+| Component | Import | Props | Notes |
+|-----------|--------|-------|-------|
+| `InsightCallout` | `import InsightCallout from '../../../components/InsightCallout'` | `children`, `color` | Colors: `violet` (default), `amber`, `emerald`, `blue`, `red`, `cyan`, `orange`, `indigo`, `rose`, `teal`, `purple`. No `emoji`/`icon` prop. |
+| `CustomTooltip` | `import CustomTooltip from '../../../components/CustomTooltip'` | Recharts `content` | `<Tooltip content={<CustomTooltip />} />` |
+| `GlossaryTerm` | `import { GlossaryTerm } from '../../../components/GlossaryTerm'` | `term`, `glossary`, `children` | `term` must exactly match a glossaryTerms key. |
 
-### Output Mode: Template (extension-driven)
+### Template Mode (extension-driven)
 
-When the active extension has `output_mode: template`, Phase 6 produces a JSON data file instead of a React project. See [collections-architecture.md](references/collections-architecture.md) for the full specification.
+When extension has `output_mode: template` → produces JSON data file. See [collections-architecture.md](references/collections-architecture.md).
 
-#### Steps:
+### Store Original Query
 
-1. **Read pointer config** and `hub-config.json` (same as bespoke steps 1-2)
-2. **Check if collection exists:** Look for `<personalHubPath>/src/collections/<extension-slug>/`
-   - **If not:** First-run setup — copy `Template.jsx` and `schema.json` from the extension directory, create `manifest.json` with empty items array, create `items/` directory. Add collection entry to `hub-config.json` `collections` array.
-   - **If yes:** Collection already installed — proceed to step 3.
-3. **Generate item slug** (kebab-case from item identifier, e.g., "inc-0012345")
-4. **Write item JSON** to `<personalHubPath>/src/collections/<extension-slug>/items/<item-slug>.json`
-5. **Update manifest.json** — add item entry with slug, title, subtitle, createdAt, tags, searchText
-6. **Update `hub-config.json`** — increment `itemCount` and update `lastUpdated` on the collection entry
-7. **Check dev server / open browser** (same as bespoke steps 8-9)
-
-### Important: Store the User's Original Query
-
-When updating `hub-config.json` and `projects/index.js`, always store the user's original natural-language query in the `query` field. This is displayed in the hub's project cards and sidebar so the user remembers what each research was about.
+Always store user's original query in `hub-config.json` `query` field for hub UI display.
 
 ---
 
-## Phase 6B: ENRICH — Key Term Glossary (Post-Build)
+## Phase 6B: ENRICH — Key Term Glossary
 
-After the dashboard is built, scan all user-facing text content (section titles, subtitles, insight callouts, chart labels, overview paragraphs) and identify domain-specific, technical, or tribal terms that a general audience would not immediately understand. Wrap each identified term in a `<GlossaryTerm>` component that provides an inline definition flyout and a ready-to-use research prompt.
+Scan built project text, identify domain/technical terms a general audience wouldn't know, wrap in `<GlossaryTerm>`. Enabled by default (`glossaryEnrichment: true`).
 
-This step is **enabled by default** (`glossaryEnrichment: true` in `hub-config.json`). If the user sets `glossaryEnrichment: false`, skip this phase entirely and record `glossary.enabled: false` in telemetry.
-
-### Density & Selection Rules
-
-**Formula:** `terms = max(3, floor(explanatoryWordCount / 250))` — scales with text volume. Max 2 per section. Never two in the same sentence.
-
-**Selection priority (highest first):** Acronyms/initialisms → Domain jargon → Technical concepts → Tribal knowledge. Skip common words, terms already defined inline, proper nouns, and units of measurement.
+**Density:** `terms = max(3, floor(wordCount / 250))`. Max 2 per section. Never two in same sentence.
+**Priority:** Acronyms → Jargon → Technical → Tribal. Skip common words, proper nouns.
 
 ### Steps
+1. Scan text in components (overview paragraphs, callouts, labels)
+2. Rank by obscurity, apply density rules, distribute across sections
+3. Generate definition + research prompt per term
+4. Create `data/glossaryTerms.js` — `{ definition, researchPrompt }` per term
+5. Wrap in components: `<GlossaryTerm term="X" glossary={glossaryTerms}>X</GlossaryTerm>`
 
-1. **Scan all text content** in the built project — overview paragraphs, insight callout text, section subtitles, chart axis labels, and any prose in data files.
-2. **Identify and rank candidate terms** by obscurity. Apply density rules — select top-ranked terms within bounds. Distribute across sections (prefer at least 1 in the first section).
-3. **Generate for each selected term:** a plain-language **definition** (1-2 sentences, no jargon) and a **research prompt** (copy-paste-ready prompt for the skill: *"Research [term]: [expanded framing]"*).
-4. **Create `data/glossaryTerms.js`** — export a `glossaryTerms` object mapping each term to `{ definition, researchPrompt }`.
-5. **Wrap terms** in section components using the **shared** `GlossaryTerm` (installed by `install-components` — do NOT create a per-project copy). Import: `import { GlossaryTerm } from '../../components/GlossaryTerm'` and `import { glossaryTerms } from '../data/glossaryTerms'`. Usage: `<GlossaryTerm term="SDK" glossary={glossaryTerms}>SDK</GlossaryTerm>`.
+### Enrich Guardrails
 
-See [build-templates.md](assets/build-templates.md#glossaryterm-component) for the full GlossaryTerm UX spec, data schema, and component props.
+1. **JSX only.** Wraps go in `components/*.jsx` ONLY. NEVER in `data/*.js`.
+2. **Key-match required.** `term="X"` must exactly match a `glossaryTerms.js` key. Verify before writing.
+3. **Single-pass editing.** Plan ALL wraps first, execute in one `multi_edit` per file. No iterative fix passes.
+4. **No invented props.** See Shared Component Reference above.
 
----
-
-## Phase 7: PRESENT — Polish, Validate, Deliver
-
-**Ordering is critical.** Steps 1-5 must complete before steps 6-9 begin. The hub is rendered ONCE at the end, after all syncs are done, so the user sees their research in both their personal space and the public library.
-
-1. **Run `node scripts/hub-gen.mjs <hub-path> validate --fix --build --json`** — runs all 12 validation categories + vite build. Auto-fixes: unused imports, scroll classes, registry sync, telemetry wrapper unwrap, orphaned GlossaryTerm imports. Parse `--json` output: check `summary.passed` and `summary.totalErrors`.
-2. **Review validate output:** If errors remain after `--fix`, resolve manually (common: unused vars ESLint can't auto-remove, missing data keys).
-3. **QA:** Charts render, axis labels visible, tooltips correct, findings match data, citations complete, T4 estimates marked.
-4. **Extension QA:** If an extension is active, load its Phase 7 instructions for domain-specific QA checks.
-
-5. **Finalize telemetry — GATE (steps 6-9 MUST NOT run until this is done):**
-   Compute ALL telemetry fields from [hub-architecture.md](references/hub-architecture.md#telemetry-schema) and write via:
-   **`node scripts/hub-gen.mjs <hub-path> write-meta <slug> '<json>'`**
-   
-   The JSON payload must include these **exact field names** (validated by `write-meta`):
-   - **Top-level:** `runStartedAt`, `runCompletedAt`, `durationMinutes`, `includedSetup`, `skillVersion`, `userPrompt`, `researchPlan`, `checkpointModified`, `model`, `tokenUsage` (object `{input, output, total}` or null if unavailable), `searchesPerformed`, `sourcesCount`, `sectionsBuilt`, `chartsBuilt`, `filesGenerated`, `dataPointsCollected`
-   - **`phaseTiming`:** `environment`, `interpret`, `survey`, `discover`, `research`, `analyze`, `build`, `enrich`, `present` (all 9 required)
-   - **`glossary`:** `enabled`, `termsIdentified`, `termsRendered`, `termsByCategory`
-   - **`contentAnalysis`:** `fleschKincaidGrade`, `fleschKincaidLabel`, `bloomsLevel`, `bloomsLabel`, `bloomsRange`, `totalWords`, `totalSentences`, `readabilityNote`
-   - **`hoursSaved`:** `researchHours`, `totalHoursSaved`, `equivalentLabel` (use formulas from hub-architecture.md)
-   - **`consumptionTime`:** `estimatedMinutes`, `estimatedLabel`
-   - **Quality metrics (required):** `dataQualityDistribution` (T1-T4 counts), `sourceDiversityScore`, `promptComplexity`
-   
-   `write-meta` validates all required fields, unwraps the telemetry wrapper bug if present, and computes derived fields (`productionHours`) automatically. Telemetry lives ONLY in `meta.json` — NOT in `hub-config.json` or `projects/index.js`.
-   
-   **Template mode:** For template-mode extensions, telemetry is embedded in the item JSON file (not a separate meta.json).
-
-6. **Git sync (personal):** If the hub has a git remote: `git add -A` → `git commit` → `git push`. If push fails, note it.
-
-7. **Library share (gated by visibility):** Only share if the project's `visibility` is `"public"`. If `visibility` is `"personal"` or `"local"` (or missing — treated as `"personal"`), **skip sharing entirely**. For public projects, proceed for each library where contribution intent is yes (from Phase 3D):
-   - Push project files (including `meta.json`) + updated `index.js` (lightweight metadata only) to the library's `branch` via the GitHub API. Library slug = `<slug>-<gitUsername>`.
-   - See [hub-contribution.md](references/hub-contribution.md#agent-side-contribution-flow-phase-7-step-8) for the complete API flow.
-   - If 401/403: PAT may be invalid — suggest contacting the library maintainer.
-
-8. **Library sync:** For each library just pushed to, pull the latest into the local library clone: `git -C <localPath> pull`. This ensures the hub shows the user's contribution in the library view.
-
-9. **Deliver to hub:** Start dev server if not running (`npm run dev`), or tell user to refresh. Open browser preview. The user should now see their research in their personal space AND in the public library. Summarize sections, note gaps.
+> **Track (batch):**
+> ```bash
+> node $GEN $HUB track <slug> phase-end enrich 2>&1 | tail -1 && \
+> node $GEN $HUB track <slug> phase-start present 2>&1 | tail -1
+> ```
 
 ---
 
-## Edge Cases & Troubleshooting
+## Phase 7: PRESENT — Validate & Deliver
 
-See [hub-architecture.md](references/hub-architecture.md#edge-cases--troubleshooting) for the full troubleshooting table covering research, product lens, hub, git, library, and visibility edge cases.
+**Steps 1-5 must complete before 6-9.**
+
+1. **`node scripts/hub-gen.mjs <hub-path> validate --fix --build --json`** — 13 categories + vite build. Parse `summary.passed`.
+2. Fix remaining errors manually if any.
+3. QA: charts render, tooltips work, findings match data, citations complete.
+4. Extension QA if active.
+4b. **If phase timing enabled:** `track <slug> phase-end present` — must run before `write-meta`.
+> ```bash
+> node $GEN $HUB track <slug> phase-end present 2>&1 | tail -1
+> ```
+5. **Telemetry GATE:** `node scripts/hub-gen.mjs <hub-path> write-meta <slug> '<json>'` — provide all required fields per [hub-architecture.md § Telemetry](references/hub-architecture.md#telemetry-fields). Missing fields = exit 1.
+   - **If timing enabled:** DO provide `phaseTiming` estimates (tracker overrides with real values). `write-meta` sets `timingSource` automatically (`"verified"` if build log has `session-end`, `"estimated"` otherwise).
+   - **If timing skipped:** Pass `"phaseTiming": null`. `write-meta` sets `timingSource: "estimated"` automatically.
+6. **Git sync:** `git add -A` → `git commit` → `git push`
+7. **Library share:** Only if `visibility: "public"`. Push via GitHub API per [hub-contribution.md](references/hub-contribution.md).
+8. **Library sync:** `git -C <localPath> pull` for pushed libraries.
+9. **Deliver:** Start/refresh dev server, open browser preview, summarize.
+
+---
+
+## Edge Cases
+
+See [hub-architecture.md](references/hub-architecture.md#edge-cases--troubleshooting).
