@@ -12,7 +12,7 @@ license: MIT
 compatibility: Requires internet access for web search and data fetching.
 metadata:
   author: mrshaun13
-  version: "8.10"
+  version: "8.11"
 ---
 
 # Deep Research → Interactive Dashboard Pipeline

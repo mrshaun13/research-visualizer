@@ -208,6 +208,22 @@ After every dashboard is built, the agent automatically scans all text content a
 ### Data-Driven Visualization
 Chart types are selected AFTER data collection based on data shape — not prescribed by the user beforehand. The same data shape always produces the same chart type (deterministic, not random).
 
+## Prerequisites
+
+| Requirement | Minimum | Recommended | Notes |
+|-------------|---------|-------------|-------|
+| **Node.js** | 20 LTS | 22 LTS or 24 LTS | **Even-numbered LTS versions only.** Node 18 is EOL and lacks ESM/`fetch` support. Odd-numbered versions (21, 23, 25) are not LTS, go EOL in ~6 months, and may ship breaking V8/module changes before the ecosystem adapts. |
+| **npm** | 9 | 10+ | Bundled with Node — no separate install needed |
+| **Git** | 2.x | any recent | Required for hub repo init and library sync |
+| **Internet access** | Required | — | Web search used during SURVEY, DISCOVER, and RESEARCH phases |
+
+> **Node version check:** Run `node --version`.
+> - `v18.x` or lower → **upgrade required** — Node 18 is EOL and missing features the hub depends on.
+> - `v20.x`, `v22.x`, `v24.x` (even LTS) → ✅ supported.
+> - `v21.x`, `v23.x`, `v25.x` (odd "Current") → ⚠️ **not recommended** — these are short-lived non-LTS releases that may have untested breaking changes. Switch to the nearest even LTS.
+>
+> On macOS/Linux with nvm: `nvm install 22 && nvm use 22`. On Windows: download from [nodejs.org](https://nodejs.org).
+
 ## Tech Stack
 
 - **React 18** + **Vite 5** — app framework
@@ -228,7 +244,7 @@ The skill prevents inconsistent output through:
 
 ```
 research-visualizer/
-├── SKILL.md                              # Core pipeline instructions (v8.10)
+├── SKILL.md                              # Core pipeline instructions (v8.11)
 ├── README.md                             # This file
 ├── config.json                           # Machine-local pointer (personalHubPath only, created on first run)
 ├── scripts/

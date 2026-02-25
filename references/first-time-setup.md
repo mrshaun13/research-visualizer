@@ -2,6 +2,31 @@
 
 This runs ONCE per machine. The goal is to either clone an existing personal hub or scaffold a new one, then create the machine-local pointer.
 
+## Runtime Requirements Check
+
+Before doing anything else, verify the user's environment meets the minimum requirements:
+
+1. **Check Node.js version:** Run `node --version` and parse the major version number.
+
+   - **Even LTS (v20, v22, v24)** → ✅ proceed normally.
+   - **v18 or lower** → **stop immediately** and inform the user:
+     > "Your Node.js version (`<version>`) is too old for the Research Hub. Node 20 LTS or higher is required — Node 18 is EOL and lacks full ESM and native `fetch` support that the hub scaffold depends on. Please upgrade before continuing."
+     >
+     > On macOS/Linux with nvm: `nvm install 22 && nvm use 22`
+     > Without nvm: download from https://nodejs.org
+     >
+     > Re-run this skill after upgrading.
+   - **Odd "Current" (v21, v23, v25, etc.)** → **warn the user** before proceeding:
+     > "You're running Node `<version>`, which is an odd-numbered 'Current' release — not an LTS version. These go EOL within ~6 months and may have untested breaking changes with the hub's toolchain (Vite 5, React 18). I can try to proceed, but if you hit build errors, switch to the nearest even-numbered LTS (e.g., `nvm install 22`)."
+     >
+     > If the user wants to proceed → continue (but note the risk in the build log).
+     > If the user wants to switch → wait for them to upgrade and re-run.
+   - **Not installed** → stop and tell the user Node.js must be installed first.
+
+   **Why even-numbered only?** Node.js uses even/odd versioning: even numbers (20, 22, 24) become LTS with 30 months of support. Odd numbers (21, 23, 25) are short-lived "Current" releases — experimental playground, ~6 months of life, then EOL. Every major JS framework (Vite, Next.js, etc.) tests against LTS versions.
+
+---
+
 ## Initial Prompt
 
 1. **Inform the user immediately:**

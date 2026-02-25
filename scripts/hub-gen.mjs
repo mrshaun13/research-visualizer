@@ -33,7 +33,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 // Skill version — stamped into hub-config.json, generated files, and build log events
-const SKILL_VERSION = '8.10';
+const SKILL_VERSION = '8.11';
 
 // ═══════════════════════════════════════════════════
 //  CLI PARSING
@@ -709,11 +709,11 @@ function addProject() {
   const componentsDir = join(projectDir, 'components');
   const dataDir = join(projectDir, 'data');
 
+  if (!dryRun) {
+    mkdirSync(componentsDir, { recursive: true });
+    mkdirSync(dataDir, { recursive: true });
+  }
   if (!existsSync(projectDir)) {
-    if (!dryRun) {
-      mkdirSync(componentsDir, { recursive: true });
-      mkdirSync(dataDir, { recursive: true });
-    }
     logAction('mkdir', `src/projects/${slug}/{components,data}`);
   }
 
