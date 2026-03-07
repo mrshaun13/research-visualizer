@@ -12,7 +12,7 @@ license: MIT
 compatibility: Requires internet access for web search and data fetching.
 metadata:
   author: mrshaun13
-  version: "8.13"
+  version: "8.14"
 ---
 
 # Deep Research → Interactive Dashboard Pipeline
@@ -248,6 +248,13 @@ Decisions made HERE, after seeing the data.
    ```
 8. Open browser preview
 
+> **Code hygiene rule:** Only declare a variable (`const`, `let`) if it is referenced in the JSX return value or passed to a child component. Do not leave computed values that are unused. If a value was computed for exploration but isn't needed in the final render, delete it before moving to the next component.
+
+> **Atomic write groups:** Write files in three ordered batches to prevent Vite HMR from seeing partial project state:
+> 1. All `data/` files (`researchData.js`, any JSON)
+> 2. All `components/` files
+> 3. `App.jsx` + registry update (`sync-registry`) + `hub-config.json` update
+
 > **Track (batch):**
 > ```bash
 > node $GEN $HUB track <slug> phase-end build 2>&1 | tail -1 && \
@@ -308,6 +315,7 @@ Scan built project text, identify domain/technical terms a general audience woul
 **Steps 1-5 must complete before 6-9.**
 
 1. **`node scripts/hub-gen.mjs <hub-path> validate --fix --build --json`** — 13 categories + vite build. Parse `summary.passed`.
+   - **Zero-warning gate:** After `--fix`, re-run `node $GEN $HUB validate --check`. Exit code 0 = clean. Exit code 1 = errors (fix before proceeding). Exit code 2 = warnings remain (run `node $GEN $HUB doctor` then re-validate).
 2. Fix remaining errors manually if any.
 3. QA: charts render, tooltips work, findings match data, citations complete.
 4. Extension QA if active.

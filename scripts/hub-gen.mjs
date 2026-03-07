@@ -33,7 +33,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 // Skill version — stamped into hub-config.json, generated files, and build log events
-const SKILL_VERSION = '8.13';
+const SKILL_VERSION = '8.14';
 
 // Skill root — the directory containing SKILL.md (parent of scripts/)
 // Used for writing config.json (pointer config) relative to the skill's install location.
@@ -460,6 +460,12 @@ function finish() {
     else if (warns > 0) log(`Done: ${total} actions, ${warns} warnings`);
     else log(`Done: ${total} actions`);
   }
+  // --check mode: exit 0 (clean), 1 (errors), 2 (warnings only — soft fail for CI)
+  if (checkOnly) {
+    if (results.errors.length > 0) process.exit(1);
+    if (results.warnings.length > 0) process.exit(2);
+    process.exit(0);
+  }
   process.exit(results.errors.length > 0 ? 1 : 0);
 }
 
@@ -596,6 +602,10 @@ function generateRegistryFile(projects, importPrefix) {
 
 function escapeJs(str) {
   return str.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+}
+
+function slugToTitle(slug) {
+  return slug.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
 }
 
 // ═══════════════════════════════════════════════════
@@ -2267,16 +2277,155 @@ function validateWithEslint() {
   for (const f of results) { if (f.output !== undefined) eslintFixedCount++; }
   if (eslintFixedCount > 0) logAction('eslint-fix', `ESLint auto-fixed ${eslintFixedCount} files`);
 
-  // Note: unused-imports/no-unused-vars warnings are reported but NOT auto-fixed.
-  // Removing variable declarations requires AST-based transformation (jscodeshift)
-  // to be safe. SKILL.md instructs the AI to resolve these warnings after validate --fix.
-  // Future: WXSA-19286 tracks adding jscodeshift for proper AST-based auto-fix.
+  // Pass 2: Programmatically delete/prefix unused variable declarations
+  // ESLint --fix handles unused imports but NOT variable declarations (no auto-fix for no-unused-vars).
+  if (canFix && !dryRun) {
+    const unusedVarFixes = fixUnusedVars(results);
+    if (unusedVarFixes > 0) {
+      // Re-run ESLint (no --fix) to get updated results after our programmatic fixes
+      runEslint(eslintBin, tmpFile, false);
+      try { results = JSON.parse(readFileSync(tmpFile, 'utf-8')); } catch { /* keep old results */ }
+    }
+  }
 
   // Report remaining issues
   reportEslintResults(results);
 
   // Clean up
   try { execSync(`rm -f "${tmpFile}"`, { stdio: 'pipe' }); } catch {}
+}
+
+// Programmatically fix unused variable declarations that ESLint --fix cannot handle.
+// Handles three patterns:
+//   1. `const/let/var X = ...;`  → delete entire statement
+//   2. Unused function arg       → prefix with `_`
+//   3. Unused destructured key   → remove that key from destructuring
+// Returns count of fixes applied.
+function fixUnusedVars(eslintResults) {
+  let totalFixed = 0;
+
+  for (const file of eslintResults) {
+    const unusedMsgs = (file.messages || []).filter(
+      m => m.severity === 1 && m.ruleId === 'unused-imports/no-unused-vars'
+    );
+    if (unusedMsgs.length === 0) continue;
+
+    let src;
+    try { src = readFileSync(file.filePath, 'utf-8'); } catch { continue; }
+    const lines = src.split('\n');
+    let dirty = false;
+
+    // Process messages sorted by line descending so line numbers stay valid after deletions
+    const sorted = [...unusedMsgs].sort((a, b) => b.line - a.line);
+
+    for (const msg of sorted) {
+      const lineIdx = msg.line - 1; // 0-based
+      if (lineIdx < 0 || lineIdx >= lines.length) continue;
+      const line = lines[lineIdx];
+      const varName = extractVarName(msg.message);
+      if (!varName) continue;
+
+      // Pattern 1: `const/let/var X = ...` — delete entire statement
+      const assignRe = new RegExp(`^(\\s*)(const|let|var)\\s+${escapeRegex(varName)}\\s*=`);
+      if (assignRe.test(line)) {
+        const deleted = deleteStatement(lines, lineIdx);
+        if (deleted > 0) {
+          totalFixed++;
+          dirty = true;
+          logAction('eslint-unused-fix', `${file.filePath.replace(HUB + '/', '')}:${msg.line} — deleted unused ${varName}`);
+        }
+        continue;
+      }
+
+      // Pattern 2: unused function arg — prefix with `_`
+      // ESLint message: "'X' is defined but never used. Allowed unused args must match /^_/u"
+      if (msg.message.includes('Allowed unused args')) {
+        const argRe = new RegExp(`\\b${escapeRegex(varName)}\\b`);
+        const fixed = lines[lineIdx].replace(argRe, `_${varName}`);
+        if (fixed !== lines[lineIdx]) {
+          lines[lineIdx] = fixed;
+          totalFixed++;
+          dirty = true;
+          logAction('eslint-unused-fix', `${file.filePath.replace(HUB + '/', '')}:${msg.line} — prefixed unused arg _${varName}`);
+        }
+        continue;
+      }
+
+      // Pattern 3: unused destructured key — `const { X, other } = ...` → remove X
+      const destructRe = new RegExp(`^(\\s*(?:const|let|var)\\s*\\{[^}]*)\\b${escapeRegex(varName)}\\b\\s*,?([^}]*\\})`);
+      if (destructRe.test(line)) {
+        // Remove "varName," or ", varName" from the destructuring
+        let fixed = line
+          .replace(new RegExp(`\\b${escapeRegex(varName)}\\s*,\\s*`), '')
+          .replace(new RegExp(`,\\s*\\b${escapeRegex(varName)}\\b`), '');
+        // Clean up trailing comma inside braces: { X, } → { }
+        fixed = fixed.replace(/,\s*(})/, ' $1');
+        if (fixed !== line) {
+          lines[lineIdx] = fixed;
+          totalFixed++;
+          dirty = true;
+          logAction('eslint-unused-fix', `${file.filePath.replace(HUB + '/', '')}:${msg.line} — removed unused destructured key ${varName}`);
+        }
+        continue;
+      }
+
+      // Pattern 4: unused catch binding — `catch (e)` → `catch`
+      const catchRe = new RegExp(`\\bcatch\\s*\\(\\s*${escapeRegex(varName)}\\s*\\)`);
+      if (catchRe.test(line)) {
+        const fixed = lines[lineIdx].replace(catchRe, 'catch');
+        if (fixed !== lines[lineIdx]) {
+          lines[lineIdx] = fixed;
+          totalFixed++;
+          dirty = true;
+          logAction('eslint-unused-fix', `${file.filePath.replace(HUB + '/', '')}:${msg.line} — removed unused catch binding ${varName}`);
+        }
+      }
+    }
+
+    if (dirty) {
+      writeFileSync(file.filePath, lines.join('\n'));
+    }
+  }
+
+  return totalFixed;
+}
+
+// Delete a statement starting at lineIdx, scanning forward for the closing semicolon.
+// Returns number of lines deleted. Mutates the lines array in place.
+function deleteStatement(lines, lineIdx) {
+  // Track open parens/brackets to handle multi-line initializers
+  let depth = 0;
+  let endIdx = lineIdx;
+
+  for (let i = lineIdx; i < lines.length; i++) {
+    const l = lines[i];
+    for (const ch of l) {
+      if (ch === '(' || ch === '[' || ch === '{') depth++;
+      else if (ch === ')' || ch === ']' || ch === '}') depth--;
+    }
+    // Statement ends when depth returns to 0 and line ends with `;`
+    if (depth <= 0 && l.trimEnd().endsWith(';')) {
+      endIdx = i;
+      break;
+    }
+    // Safety: don't eat more than 20 lines (handles malformed source gracefully)
+    if (i - lineIdx >= 20) { endIdx = lineIdx; break; }
+  }
+
+  const deleteCount = endIdx - lineIdx + 1;
+  lines.splice(lineIdx, deleteCount);
+  return deleteCount;
+}
+
+// Extract variable name from ESLint message: "'X' is defined but never used"
+function extractVarName(message) {
+  const m = message.match(/^'([^']+)'/);
+  return m ? m[1] : null;
+}
+
+// Escape a string for use as a regex literal
+function escapeRegex(str) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function runEslint(eslintBin, outputFile, fix) {
@@ -2356,7 +2505,7 @@ function validateUIWiring() {
     [/ChevronRight/, 'ChevronRight icon import'],
     [/onDetailClick/, 'onDetailClick prop/handler'],
     [/onCompareToggle/, 'onCompareToggle prop/handler'],
-    [/project\.telemetry/, 'telemetry inline fallback for local projects'],
+    [/telemetry(?:Cache|\[|\.)/, 'TELEMETRY_CACHE or telemetry accessor'],
     [/<ProjectDetailFlyout/, 'ProjectDetailFlyout overlay rendered'],
     [/<CompareView/, 'CompareView overlay rendered'],
     [/compareCount/, 'compare count logic'],
@@ -2423,9 +2572,56 @@ function validateStructural(config) {
 
   // Orphan directories
   const dirs = getProjectDirs(PATHS.projectsDir);
-  for (const dir of dirs) {
-    if (!regSlugs.includes(dir)) logWarn('orphan', `${dir}/ exists on disk but not in index.js`);
+  const orphans = dirs.filter(dir => !regSlugs.includes(dir));
+  let orphanRegistered = false;
+
+  for (const dir of orphans) {
+    const hasApp = existsSync(join(PATHS.projectsDir, dir, 'App.jsx'));
+
+    if (!hasApp) {
+      // No App.jsx — truly orphaned junk, not a real project
+      logError('orphan', `${dir}/ exists on disk but has no App.jsx and is not in index.js — remove manually`);
+      continue;
+    }
+
+    if (canFix && !dryRun) {
+      // Auto-register: read meta.json if available for better defaults
+      const metaPath = join(PATHS.projectsDir, dir, 'meta.json');
+      let title = slugToTitle(dir);
+      let subtitle = 'Imported from orphaned project directory';
+      let query = dir.replace(/-/g, ' ');
+
+      if (existsSync(metaPath)) {
+        try {
+          const meta = JSON.parse(readFileSync(metaPath, 'utf-8'));
+          const userPrompt = meta.userPrompt || (meta.telemetry && meta.telemetry.userPrompt);
+          if (userPrompt) query = userPrompt;
+        } catch { /* use defaults */ }
+      }
+
+      config.projects = config.projects || [];
+      config.projects.push({
+        slug: dir,
+        title,
+        subtitle,
+        query,
+        lens: 'standard',
+        icon: 'FlaskConical',
+        accentColor: 'blue',
+        visibility: 'personal',
+        createdAt: new Date().toISOString().split('T')[0],
+        updatedAt: new Date().toISOString().split('T')[0],
+      });
+      writeFileSync(PATHS.hubConfig, JSON.stringify(config, null, 2) + '\n');
+      orphanRegistered = true;
+      logAction('orphan-fix', `${dir}/ — auto-registered into hub-config.json (title: "${title}", query: "${query.slice(0, 60)}${query.length > 60 ? '…' : ''}")`);
+    } else {
+      logWarn('orphan', `${dir}/ exists on disk but not in index.js — use --fix to auto-register`);
+    }
   }
+
+  // Re-sync registry once after all orphan registrations
+  if (orphanRegistered) syncRegistry();
 }
 
 // ─── 7. Public library structural ────────────────
@@ -2601,15 +2797,30 @@ function validateOrphanedTrackers() {
     const tp = trackerPath(slug);
     if (!existsSync(tp)) continue;
 
+    // Check if tracker already has a session-end
+    const events = readTracker(slug);
+    const hasSessionEnd = events.some(e => e.event === 'session-end');
+    if (hasSessionEnd) { logVerbose(`${slug} tracker already closed`); continue; }
+
     const stat = statSync(tp);
     const ageMs = now - stat.mtimeMs;
     const ageHours = Math.round(ageMs / (60 * 60 * 1000) * 10) / 10;
 
     if (ageMs > MAX_AGE_MS) {
       if (canFix && !dryRun) {
-        logWarn('tracker', `${slug} — stale build-log.jsonl (${ageHours}h old, no session-end) — build may have been interrupted`);
+        const sessionId = getSessionId(slug);
+        const sessionEndEvent = {
+          event: 'session-end',
+          ts: new Date().toISOString(),
+          sessionId,
+          status: 'completed',
+          source: 'doctor',
+          reason: 'stale-tracker-cleanup',
+        };
+        appendTrackerEvent(slug, sessionEndEvent);
+        logAction('tracker-fix', `${slug} — closed stale build-log.jsonl (${ageHours}h old) with session-end (source: "doctor")`);
       } else {
-        logWarn('tracker', `${slug} has stale build-log.jsonl (${ageHours}h old, status: in-progress) — build may have been interrupted`);
+        logWarn('tracker', `${slug} has stale build-log.jsonl (${ageHours}h old, status: in-progress) — use --fix to auto-close`);
       }
     } else {
       logVerbose(`${slug} has active tracker (${ageHours}h old)`);

@@ -7,6 +7,14 @@ import {
 import ProjectDetailFlyout from './ProjectDetailFlyout';
 import CompareView from './CompareView';
 
+const _telemetryModules = import.meta.glob('/src/projects/*/meta.json', { eager: true });
+const TELEMETRY_CACHE = Object.fromEntries(
+  Object.entries(_telemetryModules).map(([path, mod]) => {
+    const slug = path.split('/')[3];
+    return [slug, mod.default ?? mod];
+  })
+);
+
 const LENS_BADGES = {
   standard: { label: 'Research', bg: 'bg-blue-500/10', text: 'text-blue-400', border: 'border-blue-500/20' },
   product: { label: 'Product Compare', bg: 'bg-amber-500/10', text: 'text-amber-400', border: 'border-amber-500/20' },
