@@ -8,12 +8,20 @@ import ProjectDetailFlyout from './ProjectDetailFlyout';
 import CompareView from './CompareView';
 
 const _telemetryModules = import.meta.glob('/src/projects/*/meta.json', { eager: true });
-const TELEMETRY_CACHE = Object.fromEntries(
-  Object.entries(_telemetryModules).map(([path, mod]) => {
+// Public library meta.json files — resolved via @public-library Vite alias
+const _publicTelemetryModules = import.meta.glob('/@public-library/projects/*/meta.json', { eager: true });
+const TELEMETRY_CACHE = Object.fromEntries([
+  ...Object.entries(_telemetryModules).map(([path, mod]) => {
     const slug = path.split('/')[3];
     return [slug, mod.default ?? mod];
-  })
-);
+  }),
+  ...Object.entries(_publicTelemetryModules).map(([path, mod]) => {
+    const parts = path.split('/');
+    const projIdx = parts.indexOf('projects');
+    const slug = projIdx >= 0 ? parts[projIdx + 1] : parts[parts.length - 2];
+    return [slug, mod.default ?? mod];
+  }),
+]);
 
 const LENS_BADGES = {
   standard: { label: 'Research', bg: 'bg-blue-500/10', text: 'text-blue-400', border: 'border-blue-500/20' },
@@ -144,7 +152,7 @@ function VisibilityBadge({ visibility = 'personal' }) {
 
 function ProjectCard({ project, onProjectClick, getAccent, formatDate, ProjectIcon, source = 'local', telemetry, onDetailClick, compareSelected, onCompareToggle }) {
   const accent = getAccent(project.accentColor);
-  const t = telemetry;
+  const t = telemetry || project.telemetry;
   const isLibrary = source === 'library';
 
   return (
@@ -249,7 +257,7 @@ function ProjectCard({ project, onProjectClick, getAccent, formatDate, ProjectIc
           {isLibrary && <CommunityBadge />}
           {!isLibrary && <VisibilityBadge visibility={project.visibility || 'personal'} />}
           <span className="text-[10px] text-gray-600">
-            {formatDate(project.createdAt)}
+            {formatDate((t && t.runStartedAt) || project.createdAt)}
           </span>
           {t && (
             <>
@@ -302,7 +310,7 @@ export default function HubHome({ projects, publicProjects = [], onProjectClick,
     const allProjects = [...projects, ...publicProjects];
     const project = allProjects.find(p => p.slug === slug);
     if (project) {
-      setDetailProject({ ...project, telemetry: telemetryCache[slug], _source: source });
+      setDetailProject({ ...project, telemetry: telemetryCache[slug] || project.telemetry, _source: source });
     }
   };
 
@@ -317,7 +325,7 @@ export default function HubHome({ projects, publicProjects = [], onProjectClick,
 
   const compareCount = Object.keys(compareSelection).length;
   const allProjectsWithTelemetry = [...projects, ...publicProjects].map(p => ({
-    ...p, telemetry: telemetryCache[p.slug],
+    ...p, telemetry: telemetryCache[p.slug] || p.telemetry,
   }));
   const compareProjects = allProjectsWithTelemetry.filter(p => compareSelection[p.slug]);
 
@@ -327,9 +335,11 @@ export default function HubHome({ projects, publicProjects = [], onProjectClick,
     visibility: p.visibility || 'personal',
   }));
 
-  const sortedPublicProjects = [...publicProjects].sort(
-    (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
-  );
+  const sortedPublicProjects = [...publicProjects].sort((a, b) => {
+    const aDate = (telemetryCache[a.slug]?.runStartedAt) || a.telemetry?.runStartedAt || a.createdAt || '';
+    const bDate = (telemetryCache[b.slug]?.runStartedAt) || b.telemetry?.runStartedAt || b.createdAt || '';
+    return new Date(bDate) - new Date(aDate);
+  });
 
   // When "Include my research" is on, add user's public projects back into library results
   const myPublicProjects = includeMyResearch

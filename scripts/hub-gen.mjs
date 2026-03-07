@@ -33,7 +33,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 // Skill version — stamped into hub-config.json, generated files, and build log events
-const SKILL_VERSION = '8.14';
+const SKILL_VERSION = '8.14.1';
 
 // Skill root — the directory containing SKILL.md (parent of scripts/)
 // Used for writing config.json (pointer config) relative to the skill's install location.
