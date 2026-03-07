@@ -115,7 +115,7 @@ The agent knows where everything lives because the hub's `hub-config.json` track
 
 | File | Location | Purpose |
 |------|----------|--------|
-| `config.json` | `~/.codeium/windsurf/skills/research-visualizer/config.json` | Machine-local pointer — contains only `personalHubPath` |
+| `config.json` | `<skill-root>/config.json` | Machine-local pointer — contains only `personalHubPath` (written by `scaffold --init`) |
 | `hub-config.json` | `<personalHubPath>/hub-config.json` | Portable config (git-synced) — port, libraries, projects, collections |
 | `.local-config.json` | `<personalHubPath>/.local-config.json` | Machine-local (gitignored) — library paths for Vite aliases |
 | `projects/index.js` | `<personalHubPath>/src/projects/index.js` | Runtime registry — lightweight metadata + lazy imports (no telemetry) |
@@ -244,11 +244,12 @@ The skill prevents inconsistent output through:
 
 ```
 research-visualizer/
-├── SKILL.md                              # Core pipeline instructions (v8.11)
+├── SKILL.md                              # Core pipeline instructions (v8.13)
 ├── README.md                             # This file
 ├── config.json                           # Machine-local pointer (personalHubPath only, created on first run)
 ├── scripts/
 │   ├── hub-gen.mjs                       # Deterministic file generation tool (structural authority)
+│   ├── scaffold-templates/               # Actual template files copied by `scaffold` command
 │   └── test-tracker-fallback.mjs         # Phase-timing tracker fallback tests
 ├── extensions/                           # Pluggable specializations
 │   ├── registry.md                       # Extension catalog + builder guide
@@ -258,7 +259,7 @@ research-visualizer/
 │           └── product-comparison-template.md
 ├── assets/                               # Templates, schemas, static resources (per Agent Skills spec)
 │   ├── build-templates.md                # Tech stack, file structures, data schemas, component patterns
-│   └── hub-scaffold-templates.md         # Hub React component templates
+│   └── hub-scaffold-templates.md         # Hub scaffold architecture documentation (reference only)
 └── references/                           # Documentation agents read on demand
     ├── hub-architecture.md               # Core config schema, directory structure, project registry
     ├── hub-contribution.md               # Library contribution flow, GitHub API, security model

@@ -1,10 +1,13 @@
-# Hub Scaffold Templates
+# Hub Scaffold Templates — Reference Documentation
 
-These are the **exact files** the agent must produce when scaffolding a new Research Hub during Phase 0B-SCAFFOLD. Copy them verbatim, adjusting only the values marked with `<placeholder>`. After copying these files, run `node scripts/hub-gen.mjs <hub-path> scaffold` to generate shared components, ESLint config, and stamp `skillVersion`.
+> **Source of truth:** The actual template files live in `scripts/scaffold-templates/` as individual, inspectable, diffable files. `hub-gen.mjs scaffold` copies them directly to the hub. **Do NOT copy from this document** — it exists only as architecture documentation describing what scaffold produces and why.
+
+**To scaffold a new hub:** `node scripts/hub-gen.mjs <hub-path> scaffold --init`
+**To update an existing hub:** `node scripts/hub-gen.mjs <hub-path> scaffold` (overwrites regenerable files, preserves sacred files)
 
 **File classification — regenerable vs sacred:**
 - **Sacred (never overwritten by scripts):** `hub-config.json`, all project `components/*.jsx` and `data/*.js` files, `src/collections/*/` directories.
-- **Regenerable (produced by skill, safe to regenerate):** `src/App.jsx`, `src/components/HubHome.jsx`, `src/components/ProjectDetailFlyout.jsx`, `src/components/CompareView.jsx`, `src/components/telemetryUtils.js`, `src/projects/index.js`, `src/components/GlossaryTerm.jsx`, `src/components/CustomTooltip.jsx`, `src/components/InsightCallout.jsx`, `eslint.config.js`, project `App.jsx` shells.
+- **Regenerable (produced by `scaffold`, safe to overwrite):** `src/App.jsx`, `src/components/HubHome.jsx`, `src/components/ProjectDetailFlyout.jsx`, `src/components/CompareView.jsx`, `src/components/telemetryUtils.js`, `src/projects/index.js`, `src/components/GlossaryTerm.jsx`, `src/components/CustomTooltip.jsx`, `src/components/InsightCallout.jsx`, `eslint.config.js`, project `App.jsx` shells, `package.json`, `vite.config.js`, `tailwind.config.js`, `postcss.config.js`, `index.html`, `.gitignore`, `src/main.jsx`, `src/index.css`.
 
 **Key architecture notes:**
 - **Lightweight registries:** `projects/index.js` contains only metadata (slug, title, subtitle, query, lens, icon, accentColor, visibility, createdAt). Telemetry lives in per-project `meta.json` files and is lazy-loaded by HubHome on demand.

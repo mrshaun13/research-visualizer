@@ -33,7 +33,13 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 // Skill version — stamped into hub-config.json, generated files, and build log events
-const SKILL_VERSION = '8.12';
+const SKILL_VERSION = '8.13';
+
+// Skill root — the directory containing SKILL.md (parent of scripts/)
+// Used for writing config.json (pointer config) relative to the skill's install location.
+// Works regardless of whether the skill is installed globally or at workspace scope.
+const SKILL_ROOT = resolve(__dirname, '..');
+const SCAFFOLD_TEMPLATES = join(__dirname, 'scaffold-templates');
 
 // ═══════════════════════════════════════════════════
 //  CLI PARSING
@@ -49,6 +55,7 @@ const jsonOutput = flags.includes('--json');
 const autoFix = flags.includes('--fix');
 const checkOnly = flags.includes('--check');
 const buildVerify = flags.includes('--build');
+const initMode = flags.includes('--init');
 
 const COMMANDS = ['sync-registry', 'add-project', 'remove-project', 'write-meta', 'install-components', 'scaffold', 'validate', 'doctor', 'track', 'track-read'];
 
@@ -61,7 +68,8 @@ if (positional.length < 2 || !COMMANDS.includes(positional[1])) {
   console.error('  remove-project <slug>      Remove a project (deletes directory + config entry + re-syncs registry)');
   console.error('  write-meta <slug> <json>   Write validated meta.json for a project');
   console.error('  install-components         Install shared components to src/components/');
-  console.error('  scaffold                   Generate all Phase 0B scaffold files');
+  console.error('  scaffold                   Copy scaffold templates + install components + stamp version');
+  console.error('  scaffold --init            First-time setup: also create hub-config.json + pointer config');
   console.error('  validate                   Validate all hub files (structural + creative content)');
   console.error('  doctor                     Alias for validate --fix');
   console.error('  track <slug> <event> [args]  Append a build-log event');
@@ -1230,11 +1238,42 @@ export default function InsightCallout({ children, color = 'violet' }) {
 
 function scaffold() {
   log('\n── scaffold ──');
-  log('  Scaffold command generates hub structure files.');
-  log('  For full scaffold, see hub-scaffold-templates.md.');
-  log('  This command ensures directory structure and shared components exist.');
 
-  // Ensure directories
+  if (!existsSync(SCAFFOLD_TEMPLATES)) {
+    logError('scaffold', `Scaffold templates not found at ${SCAFFOLD_TEMPLATES}`);
+    logError('scaffold', 'This means hub-gen.mjs cannot find its own template files. Check skill installation.');
+    process.exit(1);
+  }
+
+  // ── 1. Copy all template files from scaffold-templates/ ──
+  // Regenerable files are always overwritten (users don't edit them).
+  // The extension system is the correct path for customization.
+  copyTemplateTree(SCAFFOLD_TEMPLATES, HUB);
+
+  // ── 2. Handle --init mode: create hub-config.json and pointer config ──
+  if (initMode) {
+    // Create hub-config.json with defaults if it doesn't exist
+    if (!existsSync(PATHS.hubConfig)) {
+      const defaultConfig = {
+        version: '1.0.0',
+        skillVersion: SKILL_VERSION,
+        port: 5180,
+        gitRepo: null,
+        libraries: [],
+        projects: [],
+      };
+      writeFile(PATHS.hubConfig, JSON.stringify(defaultConfig, null, 2) + '\n');
+      logAction('init', 'Created hub-config.json with defaults');
+    }
+
+    // Write pointer config (config.json) to SKILL_ROOT
+    const pointerConfigPath = join(SKILL_ROOT, 'config.json');
+    const pointerConfig = { personalHubPath: HUB };
+    if (!dryRun) writeFileSync(pointerConfigPath, JSON.stringify(pointerConfig, null, 2) + '\n');
+    logAction('init', `Wrote pointer config to ${pointerConfigPath}`);
+  }
+
+  // ── 3. Ensure directories ──
   const dirs = [
     PATHS.srcDir,
     PATHS.projectsDir,
@@ -1247,16 +1286,14 @@ function scaffold() {
     }
   }
 
-  // Install shared components
+  // ── 4. Install shared components (GlossaryTerm, CustomTooltip, InsightCallout) ──
   installComponents();
 
-  // Install ESLint config
+  // ── 5. Install ESLint config + ensure devDeps ──
   installEslintConfig();
-
-  // Ensure ESLint devDependencies in package.json
   ensureEslintDeps();
 
-  // Stamp skillVersion in hub-config.json
+  // ── 6. Stamp skillVersion and sync registry ──
   if (existsSync(PATHS.hubConfig)) {
     const config = loadHubConfig();
     if (config.skillVersion !== SKILL_VERSION) {
@@ -1267,9 +1304,40 @@ function scaffold() {
     syncRegistry();
   } else {
     logWarn('scaffold', 'hub-config.json not found — skipping registry generation and version stamp');
+    logWarn('scaffold', 'Run with --init to create hub-config.json');
   }
 
   logVerbose('Scaffold complete');
+}
+
+/**
+ * Recursively copy all files from srcDir to destDir.
+ * - Overwrites existing files (regenerable, not user-edited)
+ * - Creates directories as needed
+ * - Handles gitignore.tmpl → .gitignore rename
+ */
+function copyTemplateTree(srcDir, destDir) {
+  const entries = readdirSync(srcDir, { withFileTypes: true });
+  for (const entry of entries) {
+    const srcPath = join(srcDir, entry.name);
+    // Rename gitignore.tmpl → .gitignore (git won't track .gitignore in template dirs)
+    const destName = entry.name === 'gitignore.tmpl' ? '.gitignore' : entry.name;
+    const destPath = join(destDir, destName);
+
+    if (entry.isDirectory()) {
+      if (!existsSync(destPath)) {
+        if (!dryRun) mkdirSync(destPath, { recursive: true });
+        logAction('mkdir', destPath);
+      }
+      copyTemplateTree(srcPath, destPath);
+    } else {
+      if (!dryRun) {
+        mkdirSync(dirname(destPath), { recursive: true });
+        copyFileSync(srcPath, destPath);
+      }
+      logAction('copy', `${destName} → ${destPath}`);
+    }
+  }
 }
 
 // ═══════════════════════════════════════════════════
@@ -1570,7 +1638,19 @@ function validate() {
   // ─── 12. Orphaned build trackers ───
   validateOrphanedTrackers();
 
-  // ─── 13. Build verification (--build flag) ───
+  // ─── 14. Dark theme enforcement ───
+  validateDarkTheme(PATHS.projectsDir, 'Personal Hub');
+  if (publicProjectsDir && existsSync(publicProjectsDir)) {
+    validateDarkTheme(publicProjectsDir, 'Public Library');
+  }
+
+  // ─── 15. Recharts safety patterns ───
+  validateRechartsSafety(PATHS.projectsDir, 'Personal Hub');
+  if (publicProjectsDir && existsSync(publicProjectsDir)) {
+    validateRechartsSafety(publicProjectsDir, 'Public Library');
+  }
+
+  // ─── 16. Build verification (--build flag) ───
   if (buildVerify) {
     verifyBuild();
   }
@@ -2537,7 +2617,216 @@ function validateOrphanedTrackers() {
   }
 }
 
-// ─── 13. Build verification ──────────────────────
+// ─── 14. Dark theme enforcement ──────────────────
+
+// Light → Dark replacement pairs: [regex, replacement]
+// Order matters — more specific patterns first to avoid double-replacement
+const DARK_THEME_REPLACEMENTS = [
+  // Backgrounds
+  [/\bbg-white\b(?!\/)/g, 'bg-gray-800/50'],
+  [/\bbg-gray-50\b/g, 'bg-gray-800/30'],
+  // Text
+  [/\btext-gray-900\b/g, 'text-white'],
+  [/\btext-gray-800\b/g, 'text-gray-200'],
+  // Borders
+  [/\bborder-gray-100\b/g, 'border-gray-700/50'],
+  [/\bborder-gray-200\b/g, 'border-gray-700/50'],
+  [/\bborder-gray-300\b/g, 'border-gray-600'],
+  // Dividers
+  [/\bdivide-gray-50\b/g, 'divide-gray-800'],
+  [/\bdivide-gray-100\b/g, 'divide-gray-800'],
+  [/\bdivide-gray-200\b/g, 'divide-gray-800'],
+  // Hover states
+  [/\bhover:bg-gray-50\b/g, 'hover:bg-gray-800/30'],
+  [/\bhover:bg-gray-100\b/g, 'hover:bg-gray-800/30'],
+  // Ring
+  [/\bring-gray-100\b/g, 'ring-gray-700'],
+  [/\bring-gray-200\b/g, 'ring-gray-700'],
+  // Shadow — light shadow looks wrong on dark; use subtle border instead
+  [/\bshadow-sm\b/g, 'shadow-lg shadow-black/20'],
+  // Accent badges: bg-{color}-100 text-{color}-700 → bg-{color}-500/20 text-{color}-400
+  [/\bbg-(blue|green|red|yellow|purple|indigo|pink|orange|teal|cyan|emerald|violet|amber|lime|rose|fuchsia|sky)-100\b/g, 'bg-$1-500/20'],
+  [/\btext-(blue|green|red|yellow|purple|indigo|pink|orange|teal|cyan|emerald|violet|amber|lime|rose|fuchsia|sky)-700\b/g, 'text-$1-400'],
+  [/\btext-(blue|green|red|yellow|purple|indigo|pink|orange|teal|cyan|emerald|violet|amber|lime|rose|fuchsia|sky)-800\b/g, 'text-$1-300'],
+  [/\bbg-(blue|green|red|yellow|purple|indigo|pink|orange|teal|cyan|emerald|violet|amber|lime|rose|fuchsia|sky)-50\b/g, 'bg-$1-500/10'],
+];
+
+// Detection-only patterns (superset for counting)
+const LIGHT_THEME_DETECT = [
+  /\bbg-white\b(?!\/)/g,
+  /\bbg-gray-50\b/g,
+  /\btext-gray-900\b/g,
+  /\btext-gray-800\b/g,
+  /\bborder-gray-100\b/g,
+  /\bborder-gray-200\b/g,
+  /\bborder-gray-300\b/g,
+  /\bdivide-gray-50\b/g,
+  /\bdivide-gray-100\b/g,
+  /\bdivide-gray-200\b/g,
+  /\bhover:bg-gray-50\b/g,
+  /\bhover:bg-gray-100\b/g,
+  /\bring-gray-100\b/g,
+  /\bring-gray-200\b/g,
+  /\bbg-(blue|green|red|yellow|purple|indigo|pink|orange|teal|cyan|emerald|violet|amber|lime|rose|fuchsia|sky)-100\b/g,
+  /\btext-(blue|green|red|yellow|purple|indigo|pink|orange|teal|cyan|emerald|violet|amber|lime|rose|fuchsia|sky)-700\b/g,
+  /\btext-(blue|green|red|yellow|purple|indigo|pink|orange|teal|cyan|emerald|violet|amber|lime|rose|fuchsia|sky)-800\b/g,
+  /\bbg-(blue|green|red|yellow|purple|indigo|pink|orange|teal|cyan|emerald|violet|amber|lime|rose|fuchsia|sky)-50\b/g,
+];
+
+function countLightHits(src) {
+  let total = 0;
+  for (const rx of LIGHT_THEME_DETECT) {
+    rx.lastIndex = 0;
+    total += (src.match(rx) || []).length;
+  }
+  return total;
+}
+
+function applyDarkThemeFixes(src) {
+  let out = src;
+  for (const [rx, replacement] of DARK_THEME_REPLACEMENTS) {
+    rx.lastIndex = 0;
+    out = out.replace(rx, replacement);
+  }
+  return out;
+}
+
+function validateDarkTheme(projectsDir, label) {
+  log(`\n  ── Dark Theme (${label}) ──`);
+  const dirs = getProjectDirs(projectsDir);
+  let totalViolations = 0;
+  let totalFixed = 0;
+
+  for (const slug of dirs) {
+    // Collect all .jsx files: components/*.jsx + App.jsx
+    const filesToCheck = [];
+    const compsDir = join(projectsDir, slug, 'components');
+    if (existsSync(compsDir)) {
+      for (const f of readdirSync(compsDir).filter(f => f.endsWith('.jsx'))) {
+        filesToCheck.push({ path: join(compsDir, f), rel: `${slug}/components/${f}` });
+      }
+    }
+    const appPath = join(projectsDir, slug, 'App.jsx');
+    if (existsSync(appPath)) {
+      filesToCheck.push({ path: appPath, rel: `${slug}/App.jsx` });
+    }
+
+    for (const { path: filePath, rel } of filesToCheck) {
+      const src = readFileSync(filePath, 'utf-8');
+      const hits = countLightHits(src);
+      if (hits === 0) continue;
+
+      totalViolations += hits;
+
+      if (canFix && !dryRun) {
+        const fixed = applyDarkThemeFixes(src);
+        const remaining = countLightHits(fixed);
+        writeFileSync(filePath, fixed);
+        totalFixed += (hits - remaining);
+        if (remaining > 0) {
+          logWarn('theme', `${rel} — fixed ${hits - remaining}/${hits} light-theme classes (${remaining} remain — manual review needed)`);
+        } else {
+          logAction('theme-fix', `${rel} — converted ${hits} light → dark classes`);
+        }
+      } else {
+        logWarn('theme', `${rel} — ${hits} light-theme classes found (use --fix to auto-convert)`);
+      }
+    }
+  }
+
+  if (totalViolations === 0) {
+    logVerbose(`Dark theme: all ${dirs.length} projects pass`);
+  } else if (canFix && !dryRun) {
+    log(`  🎨 Dark theme: fixed ${totalFixed} classes across projects`);
+  }
+}
+
+// ─── 15. Recharts safety patterns ────────────────
+
+function validateRechartsSafety(projectsDir, label) {
+  log(`\n  ── Recharts Safety (${label}) ──`);
+  const dirs = getProjectDirs(projectsDir);
+  let issues = 0;
+  let fixed = 0;
+
+  for (const slug of dirs) {
+    const compsDir = join(projectsDir, slug, 'components');
+    if (!existsSync(compsDir)) continue;
+
+    const files = readdirSync(compsDir).filter(f => f.endsWith('.jsx'));
+    for (const file of files) {
+      const filePath = join(compsDir, file);
+      let src = readFileSync(filePath, 'utf-8');
+      let dirty = false;
+
+      // Check for Treemap usage without name guard
+      if (/\bTreemap\b/i.test(src)) {
+        const hasNameAccess = /\bname\.length\b/.test(src) || /\bname\.split\b/.test(src) || /\bname\.substring\b/.test(src);
+        const hasNameGuard = /!name\b/.test(src) || /name\s*==\s*null/.test(src) || /name\s*===\s*null/.test(src) || /name\s*\?\?/.test(src);
+
+        if (hasNameAccess && !hasNameGuard) {
+          if (canFix && !dryRun) {
+            // Insert "if (!name) return null;" before the first line that accesses name.length/name.split/name.substring
+            // Find the function/arrow that contains the name access and add guard at top of body
+            const guardPatterns = [
+              // Pattern: ({ ..., name, ... }) => { ... name.length
+              // Insert guard after opening brace of arrow function body
+              {
+                rx: /(=>\s*\{)([\s\S]*?)(\bname\.(length|split|substring)\b)/,
+                replace: (m, arrow, body, nameAccess) => {
+                  // Only add if guard not already present
+                  if (/if\s*\(\s*!name\b/.test(body)) return m;
+                  return `${arrow}\n    if (!name) return null;${body}${nameAccess}`;
+                },
+              },
+              // Pattern: function ...({ ..., name, ... }) { ... name.length
+              {
+                rx: /(function\s+\w+\s*\([^)]*\)\s*\{)([\s\S]*?)(\bname\.(length|split|substring)\b)/,
+                replace: (m, funcDecl, body, nameAccess) => {
+                  if (/if\s*\(\s*!name\b/.test(body)) return m;
+                  return `${funcDecl}\n  if (!name) return null;${body}${nameAccess}`;
+                },
+              },
+            ];
+
+            let patched = false;
+            for (const { rx, replace } of guardPatterns) {
+              if (rx.test(src)) {
+                src = src.replace(rx, replace);
+                patched = true;
+                break;
+              }
+            }
+
+            if (patched) {
+              dirty = true;
+              fixed++;
+              logAction('recharts-fix', `${slug}/components/${file} — added Treemap name null guard`);
+            } else {
+              logWarn('recharts', `${slug}/components/${file} — Treemap name access without guard (auto-fix couldn't find insertion point — manual fix needed)`);
+              issues++;
+            }
+          } else {
+            logWarn('recharts', `${slug}/components/${file} — Treemap accesses name without null guard (use --fix to add guard)`);
+            issues++;
+          }
+        }
+      }
+
+      if (dirty) {
+        writeFileSync(filePath, src);
+      }
+    }
+  }
+
+  if (issues === 0 && fixed === 0) {
+    logVerbose(`Recharts safety: all projects pass`);
+  } else if (fixed > 0) {
+    log(`  🛡️  Recharts safety: auto-fixed ${fixed} issue(s)`);
+  }
+}
+
+// ─── 16. Build verification ──────────────────────
 
 function verifyBuild() {
   log('\n  ── Build Verification ──');

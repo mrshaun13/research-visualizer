@@ -12,7 +12,7 @@ license: MIT
 compatibility: Requires internet access for web search and data fetching.
 metadata:
   author: mrshaun13
-  version: "8.12"
+  version: "8.13"
 ---
 
 # Deep Research → Interactive Dashboard Pipeline
@@ -35,9 +35,20 @@ ENVIRONMENT CHECK → INTERPRET → SURVEY → DISCOVER → RESEARCH → ANALYZE
 
 See [hub-architecture.md](references/hub-architecture.md) for config schema, directory structure, and project registry.
 
+### Shell Variables
+
+`SKILL_ROOT` is the directory containing this SKILL.md file. Set once per session:
+
+```bash
+GEN="<skill-root>/scripts/hub-gen.mjs"
+HUB=$(node -e "try{console.log(JSON.parse(require('fs').readFileSync('<skill-root>/config.json','utf-8')).personalHubPath)}catch{process.exit(1)}")
+```
+
+**Pre-check:** If `$GEN` does not exist, halt with: `hub-gen.mjs not found at $GEN — check skill installation.`
+
 ### Config (Two-Layer)
 
-1. **Pointer config** (`~/.codeium/windsurf/skills/research-visualizer/config.json`): Machine-local. Contains only `personalHubPath`. Installation detection marker.
+1. **Pointer config** (`<skill-root>/config.json`): Machine-local. Contains only `personalHubPath`. Written by `hub-gen.mjs scaffold --init`. Located relative to the skill's install directory (works for both global and workspace installs).
 2. **Portable config** (`<personalHubPath>/hub-config.json`): Git-synced. Port, gitRepo, libraries, projects, telemetry.
 3. **Machine-local vite config** (`<personalHubPath>/.local-config.json`): Gitignored. Library paths for Vite aliases.
 
@@ -83,7 +94,7 @@ Phase timing via `build-log.jsonl`. `write-meta` reads build log → computes ti
 - `track <slug> phase-start <phase>` / `phase-end <phase>` at every boundary.
 - `track <slug> user-prompt discover checkpoint` before and `user-response discover checkpoint` after.
 - **Every `> Track` block is exactly ONE `run_command`. Chain all calls with `&&`. This is not optional.**
-- Set `GEN` and `HUB` as shell vars in the first command; up to 6 track calls per command.
+- `$GEN` and `$HUB` are set in the Shell Variables block above; up to 6 track calls per command.
 ```bash
 node $GEN $HUB track <slug> phase-end <A> 2>&1 | tail -1 && \
 node $GEN $HUB track <slug> phase-start <B> 2>&1 | tail -1 && \

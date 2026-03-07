@@ -42,12 +42,13 @@ Before doing anything else, verify the user's environment meets the minimum requ
 
 1. **Ask for install location:** Default: `~/git/personal-research-hub/`
 2. **Clone the repo:** `git clone <repo-url> <chosen-path>`
-3. **Run `npm install`** in the cloned directory
-4. **Read `hub-config.json`** from the cloned repo — this has all projects, library configs, and settings already.
-5. **Create pointer config** at `~/.codeium/windsurf/skills/research-visualizer/config.json`:
-   ```json
-   { "personalHubPath": "<chosen-path>" }
+3. **Run scaffold to write pointer config and update shared files:**
+   ```bash
+   node $GEN <chosen-path> scaffold --init
    ```
+   This writes `config.json` (pointer) to `<skill-root>/config.json`, copies any updated scaffold templates, installs shared components, and stamps `skillVersion`.
+4. **Run `npm install`** in the cloned directory.
+5. **Read `hub-config.json`** from the cloned repo — this has all projects, library configs, and settings already.
 6. **Create `.local-config.json`** in the hub directory — for each library in `hub-config.json` `libraries` array where `browseEnabled` is true, ask the user where the library is cloned (or offer to clone it). Populate the `libraries` array with `{ name, alias, localPath }` entries.
 7. **Inform the user:** "Cloned your Research Hub with N existing projects and M library connections."
 8. **Continue to Phase 0B-LIBRARIES.**
@@ -55,17 +56,22 @@ Before doing anything else, verify the user's environment meets the minimum requ
 ## Phase 0B-SCAFFOLD: Create Fresh Hub
 
 1. **Ask for hub location:** Default: `~/git/personal-research-hub/`
-2. **Create the hub directory** and copy scaffold files verbatim from [hub-scaffold-templates.md](../assets/hub-scaffold-templates.md): `package.json`, `vite.config.js`, `tailwind.config.js`, `postcss.config.js`, `index.html`, `src/main.jsx`, `src/index.css`, `src/App.jsx`.
-3. **Create `hub-config.json`** in the hub directory — set `version: "3.0"`, `skillVersion: "8.8"`, `port: 5180`, `gitRepo` (or null), empty `libraries` array, empty `projects` array, empty `collections` array.
-4. **Run `node scripts/hub-gen.mjs <hub-path> scaffold`** — this generates: shared components (`GlossaryTerm`, `CustomTooltip`, `InsightCallout`), ESLint config, devDependencies, project registry, and stamps `skillVersion` in hub-config.json.
-5. **Run `npm install`** in the hub directory.
-6. **Initialize git repo:** `git init`, `git branch -m main`, `.gitignore` (node_modules/, dist/, .DS_Store, *.local, .local-config.json). Ask about connecting a remote — if provided, push; if skipped, local only.
-7. **Create pointer config** at `~/.codeium/windsurf/skills/research-visualizer/config.json`:
-   ```json
-   { "personalHubPath": "<chosen-path>" }
+2. **Create the hub directory and run scaffold:**
+   ```bash
+   mkdir -p <chosen-path>
+   node $GEN <chosen-path> scaffold --init
    ```
-8. **Create empty `.local-config.json`** in the hub directory: `{ "libraries": [] }`
-9. **Continue to Phase 0B-LIBRARIES.**
+   This single command does everything:
+   - Copies all scaffold template files (package.json, vite.config.js, tailwind.config.js, postcss.config.js, index.html, .gitignore, src/main.jsx, src/index.css, src/App.jsx, src/components/HubHome.jsx, src/components/ProjectDetailFlyout.jsx, src/components/CompareView.jsx, src/components/telemetryUtils.js, src/projects/index.js, src/local-projects/index.js)
+   - Installs shared components (GlossaryTerm, CustomTooltip, InsightCallout)
+   - Generates ESLint config and adds devDependencies to package.json
+   - Creates `hub-config.json` with defaults (version, skillVersion, port, empty projects/libraries)
+   - Writes pointer config (`config.json`) to `<skill-root>/config.json`
+   - Stamps `skillVersion` in hub-config.json
+3. **Run `npm install`** in the hub directory.
+4. **Initialize git repo:** `git init`, `git branch -m main`. Ask about connecting a remote — if provided, push; if skipped, local only.
+5. **Create empty `.local-config.json`** in the hub directory: `{ "libraries": [] }`
+6. **Continue to Phase 0B-LIBRARIES.**
 
 ## Phase 0B-LIBRARIES: Library Setup (One-Time Per Library)
 
