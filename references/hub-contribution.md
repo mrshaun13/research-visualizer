@@ -47,11 +47,12 @@ This ensures multiple contributors can research the same topic without overwriti
 
 ## Agent-Side Setup (Phase 0B-LIBRARIES)
 
-When the user opts in to contributing during Phase 0B-LIBRARIES and provides a PAT:
+When the user opts in to contributing during Phase 0B-LIBRARIES:
 
-1. Update the library entry in `hub-config.json` with `contributeEnabled: true`, `token`, `gitUsername`, and `branch`
+1. Update the library entry in `hub-config.json` with `contributeEnabled: true`, `token` (pre-configured shared token), `gitUsername` (derived handle — see [first-time-setup.md](first-time-setup.md) for fallback logic), and `branch: "agent-contributions"`.
 2. **No git remote is needed.** Contributions use the GitHub API directly.
-3. The PAT is used as an `Authorization: token <PAT>` header on all API calls.
+3. The shared PAT is used as an `Authorization: token <PAT>` header on all API calls.
+4. **No GitHub account or setup required from the user.** The token, repo URL, and branch are all pre-configured in the skill.
 
 ## Agent-Side Contribution Flow (Phase 7 Step 8)
 
@@ -92,13 +93,18 @@ For each library in `hub-config.json` `libraries` array where `contributeEnabled
    }
    ```
 
-6. **Create commit:**
+6. **Create commit** — include an `author` object so attribution survives the shared-PAT push:
    ```
    POST /repos/mrshaun13/research-hub/git/commits
    {
-     "message": "Add <project title> (contributor: <gitUsername>)",
+     "message": "feat: add <project title> by <gitUsername>",
      "tree": "<new tree SHA>",
-     "parents": ["<branch HEAD SHA from step 2>"]
+     "parents": ["<branch HEAD SHA from step 2>"],
+     "author": {
+       "name": "<git config user.name or 'contrib-xxxx'>",
+       "email": "<git config user.email or 'anon@research-hub.local'>",
+       "date": "<current ISO 8601 timestamp>"
+     }
    }
    ```
 
@@ -154,11 +160,9 @@ The library maintainer (repo owner) needs to configure:
    - Already configured — comprehensive checks for structure, metadata, telemetry, and content quality
 
 4. **Scoped PAT for contributors:**
-   - Create a fine-grained PAT with:
-     - Repository access: `mrshaun13/research-hub` only
-     - Permissions: Contents (write)
-   - Branch protection ensures this PAT can only write to `agent-contributions`
-   - Distribute to users who opt in
+   - Already embedded in the skill's `first-time-setup.md` defaults — no distribution step needed.
+   - Scoped to `mrshaun13/research-hub` only, `Contents + Issues: write`, no user permissions.
+   - Rotate annually (GitHub fine-grained PATs max 1 year). When rotating: update the token in `first-time-setup.md` and `hub-contribution.md` in the `research-visualizer` repo, then push. Existing users' `hub-config.json` will have the old token until they re-run setup or update manually.
 
 ## Zero-Effort Sharing
 

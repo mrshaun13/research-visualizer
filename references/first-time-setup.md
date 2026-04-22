@@ -89,13 +89,26 @@ For each library the user wants to add (start with the default Community Researc
    - Run `npm install` in the library clone if needed
 
 3. **Ask about contributing:**
-   > "Would you also like to **contribute** your research back to this library? Zero effort after a one-time setup — your agent pushes via the GitHub API after each build."
+   > "Would you also like to **contribute** your research back to this library? No account or token setup needed — the skill handles everything. Your agent will push finished dashboards via the GitHub API, a validation workflow runs automatically, and passing contributions are accepted immediately."
 
 4. **If yes to contributing:**
-   - Capture `git config user.name` (for slug collision avoidance)
-   - Ask for the contributor PAT (from the library maintainer). **Note:** The user does NOT need their own GitHub account or any git setup. The PAT is all that's needed — the agent uses the GitHub API directly.
-   - Update the library entry in `hub-config.json`: set `contributeEnabled: true`, `confirmEachShare: true`, `token`, `gitUsername`, `branch: "agent-contributions"`
-   - **Defaults:** `contributeEnabled` is `false` until the user explicitly provides a library remote AND a valid PAT. `confirmEachShare` defaults to `true` — the agent always asks before sharing. Users can set `confirmEachShare: false` later for auto-share (power-user opt-in).
+   - **Determine contributor handle** (used only for slug collision avoidance — e.g. `chainsaw-comparison-<handle>`). Try in order:
+     1. `git config user.name` → lowercase, spaces to hyphens, strip special chars (e.g. `Jane Doe` → `jane-doe`)
+     2. `git config user.email` → take the local part before `@` (e.g. `jane@example.com` → `jane`)
+     3. Neither exists → **generate a random 6-char handle** (e.g. `contrib-a3f9`) and store it in `hub-config.json` so it's stable across sessions. Inform the user: "I've assigned you a contributor handle `contrib-xxxx` — it only appears on your public contributions as a suffix to prevent name collisions. You can change it any time in hub-config.json."
+     - Do NOT prompt the user to create a GitHub account or enter anything. Zero input required.
+   - **No PAT input needed.** The Community Research Hub ships with a pre-configured shared contribution token. Update the library entry in `hub-config.json` automatically:
+     ```json
+     {
+       "contributeEnabled": true,
+       "confirmEachShare": true,
+       "token": "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",
+       "gitUsername": "<handle derived above>",
+       "branch": "agent-contributions"
+     }
+     ```
+   - **Defaults:** `confirmEachShare: true` — the agent always asks before sharing. Users can set `confirmEachShare: false` later for auto-share (power-user opt-in).
+   - **Token note:** This is a shared fine-grained PAT scoped only to `mrshaun13/research-hub` with write access to the `agent-contributions` branch only. It cannot access any other repo or account. It is intentionally distributed — treat it like a submission endpoint, not a secret.
 
 5. **If no to browsing:** Add library entry with `browseEnabled: false`. User can enable later.
 6. **If no to contributing:** Set `contributeEnabled: false` in the library entry. User can opt in later.
