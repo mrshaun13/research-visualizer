@@ -9,7 +9,7 @@ description: >
   Extensions auto-detect from user prompts and augment the pipeline with specialized logic.
   Handles the full pipeline from research discovery through interactive React dashboard delivery.
 license: MIT
-compatibility: Requires internet access for web search and data fetching.
+compatibility: Requires Node.js 20+ LTS (22 LTS recommended), npm, Git, and internet access.
 metadata:
   author: mrshaun13
   version: "8.14.1"
