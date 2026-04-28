@@ -1479,7 +1479,7 @@ export default [
       // Prevents ESLint from false-flagging React/component usage in JSX.
       'react/jsx-uses-react': 'error',
       'react/jsx-uses-vars': 'error',
-      // Catches `<Foo />` where Foo is not imported/declared. Core no-undef
+      // Catches <Foo /> where Foo is not imported/declared. Core no-undef
       // does NOT cover JSX element references, so this rule is required to
       // surface the most common AI-generated bug: missing component imports.
       'react/jsx-no-undef': 'error',
